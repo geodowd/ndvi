@@ -1,4 +1,4 @@
-cwlVersion: v1.2
+cwlVersion: v1.0
 $graph:
   - class: Workflow
     id: ndvi-workflow
@@ -6,10 +6,10 @@ $graph:
     doc: >
       The NDVI workflow will calculate Normalized Difference Vegetation Index from satellite imagery.
     requirements:
-      - class: ResourceRequirement
+      ResourceRequirement:
         coresMax: 4
         ramMax: 4096
-      - class: NetworkAccess
+      NetworkAccess:
         networkAccess: true
     inputs:
       input_cog:
@@ -31,22 +31,22 @@ $graph:
   - class: CommandLineTool
     id: ndvi-calculation-tool
     requirements:
-      - class: ResourceRequirement
+      ResourceRequirement:
         coresMax: 4
         ramMax: 4096
-      - class: DockerRequirement
+    hints:
+      DockerRequirement:
         dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:latest  
-    baseCommand: python
-    arguments:
-      - /usr/bin/ndvi.py
+    baseCommand: ["python","-u", "/usr/bin/ndvi.py"]
     inputs:
       input_cog:
         type: File
         inputBinding:
-          position: 1
           prefix: --input_cog
+          separate: false
+          position: 1
     outputs:
       result:
-            type: Directory
-            outputBinding:
-                glob: .
+        type: Directory
+        outputBinding:
+          glob: output_ndvi
