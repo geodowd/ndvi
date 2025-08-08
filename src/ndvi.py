@@ -163,13 +163,10 @@ def ndvi_calculation(input_cog: str, output_ndvi: str, red_band=4, nir_band=8):
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
-        # Write temp NDVI GeoTIFF
+        # Write NDVI GeoTIFF
         profile.update(dtype="float32", count=1)
         with rasterio.open(output_ndvi, "w", **profile) as dst:
             dst.write(ndvi, 1)
-
-        # Export to COG (no GDAL CLI, just rio)
-        rio_copy(output_ndvi, output_ndvi, driver="COG", dtype="float32")
 
     except RasterioIOError as e:
         logger.error(f"Error reading input file: {e}")
@@ -186,9 +183,6 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Calculate NDVI from a COG file.")
     parser.add_argument("--input_cog", type=str, required=True, help="Input COG file.")
     parser.add_argument(
-        "--output_folder", type=str, default="output", help="Output folder for results."
-    )
-    parser.add_argument(
         "--red_band", type=int, default=4, help="Red band number (default: 4)."
     )
     parser.add_argument(
@@ -200,7 +194,7 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     input_cog = args.input_cog
-    output_folder = args.output_folder
+    output_folder = "./"
 
     # Create output filename
     input_basename = os.path.splitext(os.path.basename(input_cog))[0]
@@ -210,6 +204,10 @@ if __name__ == "__main__":
     # Calculate NDVI
     ndvi_calculation(input_cog, temp_cog, args.red_band, args.nir_band)
     rio_copy(temp_cog, output_cog, driver="COG", dtype="float32")
+
+    # Clean up temporary file
+    if os.path.exists(temp_cog):
+        os.remove(temp_cog)
 
     # Create STAC metadata
     create_stac(input_cog, output_cog, output_folder)
