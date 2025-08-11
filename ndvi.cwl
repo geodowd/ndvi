@@ -9,8 +9,6 @@ $graph:
       ResourceRequirement:
         coresMax: 4
         ramMax: 4096
-      NetworkAccess:
-        networkAccess: true
     inputs:
       input_cog:
         type: File
@@ -36,8 +34,8 @@ $graph:
         ramMax: 4096
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:latest  
-    baseCommand: ["python","-u", "/usr/bin/ndvi.py"]
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:simples
+    baseCommand: ["python3", "/app/run.py"]
     inputs:
       input_cog:
         type: File
@@ -49,4 +47,4 @@ $graph:
       result:
         type: Directory
         outputBinding:
-          glob: output_ndvi
+          glob: .

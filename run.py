@@ -6,10 +6,14 @@ import sys
 import logging
 from pathlib import Path
 from datetime import datetime
+from rasterio.shutil import copy as rio_copy
+
 from rasterio.errors import RasterioIOError
 import pystac
 import pystac.utils
-from stac.py import generate_stac
+import datetime as dt
+import json
+import time
 
 # Configure logging to flush immediately
 logging.basicConfig(
@@ -22,8 +26,67 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def generate_catalog(cat_id: str, item_id: str):
+    data = {
+        "stac_version": "1.0.0",
+        "id": cat_id,
+        "type": "Catalog",
+        "description": "Root catalog",
+        "links": [
+            {"type": "application/geo+json", "rel": "item", "href": f"{item_id}.json"},
+            {"type": "application/json", "rel": "self", "href": f"{cat_id}.json"},
+        ],
+    }
+    with open("./catalog.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+
+def generate_item(cat_id: str, item_id: str, date: str):
+    data = {
+        "stac_version": "1.0.0",
+        "id": item_id,
+        "type": "Feature",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [
+                [[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]
+            ],
+        },
+        "properties": {"created": date, "datetime": date, "updated": date},
+        "bbox": [-180, -90, 180, 90],
+        "assets": {},
+        "links": [
+            {"type": "application/json", "rel": "parent", "href": "catalog.json"},
+            {"type": "application/geo+json", "rel": "self", "href": f"{item_id}.json"},
+            {"type": "application/json", "rel": "root", "href": "catalog.json"},
+        ],
+    }
+
+    with open(f"./{item_id}.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+
+def generate_stac():
+    cat_id = "demo-catalog"
+    item_id = "demo-item"
+    now = time.time_ns() / 1_000_000_000
+    dateNow = dt.datetime.fromtimestamp(now)
+    dateNow = dateNow.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    # Generate STAC Catalog
+    generate_catalog(cat_id, item_id)
+    # Generate STAC Item
+    generate_item(cat_id, item_id, dateNow)
+
+
 def validate_file_exists(file_path: str, description: str):
     """Validate that a file exists and is not empty."""
+    # Check if it's a URL
+    if file_path.startswith(("http://", "https://", "s3://")):
+        logger.info(f"Input is a URL: {file_path}")
+        # For URLs, we'll validate when we actually try to read them
+        return
+
+    # Local file validation
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"{description} does not exist: {file_path}")
     if os.path.getsize(file_path) == 0:
@@ -248,7 +311,7 @@ if __name__ == "__main__":
     logger.info("Starting NDVI processing pipeline...")
     print("Starting NDVI processing pipeline....")
     try:
-        """ args = parse_args()
+        args = parse_args()
         input_cog = args.input_cog
 
         # Create dedicated output directory
@@ -272,7 +335,7 @@ if __name__ == "__main__":
 
         # Calculate NDVI
         logger.info("Step 1: Calculating NDVI...")
-        ndvi_calculation(input_cog, str(temp_cog), args.red_band, args.nir_band)
+        ndvi_calculation(input_cog, str(temp_cog))
 
         logger.info("Step 2: Converting to COG format...")
         rio_copy(str(temp_cog), str(output_cog), driver="COG", dtype="float32")
@@ -288,7 +351,7 @@ if __name__ == "__main__":
             logger.info("Temporary file removed")
 
         # Create STAC metadata
-        # create_stac_catalog(input_cog, str(output_c og), output_dir)"""
+        # create_stac_catalog(input_cog, str(output_c og), output_dir)
 
         logger.info("Step 3: Creating STAC metadata...")
         generate_stac()

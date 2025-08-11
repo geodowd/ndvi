@@ -16,7 +16,3 @@ RUN chmod +x /usr/bin/*.py
 FROM python:3.12.0-slim
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/bin /usr/bin
-
-ENV PATH="/app:${PATH}"
-
-CMD ["python3", "-u" ,"ndvi.py"]
