@@ -1,19 +1,21 @@
-cwlVersion: v1.0
+cwlVersion: v1.2
 $namespaces:
   s: https://schema.org/
 s:softwareVersion: 0.1.2
 schemas:
   - http://schema.org/version/9.0/schemaorg-current-http.rdf
+
 $graph:
-  # Workflow entrypoint
   - class: Workflow
     id: ndvi-workflow
     label: Token Access Test App
     doc: Test Token Access
     requirements:
-      ResourceRequirement:
+      - class: ResourceRequirement
         coresMax: 1
         ramMax: 1024
+      - class: NetworkAccess
+        networkAccess: true
     inputs:
       input_cog:
         label: the workspace to test access for
@@ -29,19 +31,20 @@ $graph:
         run: "#test-access"
         in:
           input_cog: input_cog
-        out:
-          - results
-  # convert.sh - takes input args `--url`
+        out: [results]
+
   - class: CommandLineTool
     id: test-access
     requirements:
-      ResourceRequirement:
+      - class: NetworkAccess
+        networkAccess: true
+      - class: ResourceRequirement
         coresMax: 1
         ramMax: 512
-      EnvVarRequirement:
+      - class: EnvVarRequirement
         envDef:
-          WORKSPACE_TOKEN: <<REPLACE>>
-      InlineJavascriptRequirement: {}
+          WORKSPACE_TOKEN: "<<REPLACE>>"
+      - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
         dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:simples
@@ -53,9 +56,9 @@ $graph:
           prefix: --input_cog=
           separate: false
           position: 1
-          
     outputs:
       results:
         type: Directory
         outputBinding:
-          glob: .
+          glob: "."
+
