@@ -1,17 +1,16 @@
-FROM python:3.12.0-slim AS builder
-LABEL authors="Sparkgeo UK"
+FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
-ADD requirements.txt /tmp/requirements.txt
+COPY ./requirements.txt /app
 
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN apt-get update
+RUN python3 -m pip install --upgrade pip
 
+RUN pip install --no-cache-dir -r requirements.txt
 
-FROM python:3.12.0-slim
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/bin /usr/bin
-COPY . /usr/bin/
-RUN chmod +x /usr/bin/*.py
+COPY ./*.py /app
+
+ENV PATH="/app:${PATH}"
+
+CMD ["python3", "-u" ,"run.py"]

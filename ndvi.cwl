@@ -1,50 +1,64 @@
-cwlVersion: v1.0
+cwlVersion: v1.2
+$namespaces:
+  s: https://schema.org/
+s:softwareVersion: 0.1.2
+schemas:
+  - http://schema.org/version/9.0/schemaorg-current-http.rdf
+
 $graph:
   - class: Workflow
     id: ndvi-workflow
-    label: NDVI Processing Workflow
-    doc: >
-      The NDVI workflow will calculate Normalized Difference Vegetation Index from satellite imagery.
+    label: Token Access Test App
+    doc: Test Token Access
     requirements:
-      ResourceRequirement:
-        coresMax: 4
-        ramMax: 4096
+      - class: ResourceRequirement
+        coresMax: 1
+        ramMax: 1024
+      - class: NetworkAccess
+        networkAccess: true
     inputs:
       input_cog:
-        type: File
-        doc: Input COG file for NDVI calculation
+        label: the workspace to test access for
+        doc: workspace to test access
+        type: string
     outputs:
-      - id: asset-result
+      - id: results
         type: Directory
         outputSource:
-          - ndvi-calculation/result
+          - test-access/results
     steps:
-      ndvi-calculation:
-        run: "#ndvi-calculation-tool"
+      test-access:
+        run: "#test-access"
         in:
           input_cog: input_cog
-        out:
-          - result
+        out: [results]
 
   - class: CommandLineTool
-    id: ndvi-calculation-tool
+    id: test-access
     requirements:
-      ResourceRequirement:
-        coresMax: 4
-        ramMax: 4096
+      - class: NetworkAccess
+        networkAccess: true
+      - class: ResourceRequirement
+        coresMax: 1
+        ramMax: 512
+      - class: EnvVarRequirement
+        envDef:
+          WORKSPACE_TOKEN: "<<REPLACE>>"
+      - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:simples
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:2
     baseCommand: ["python3", "/app/run.py"]
     inputs:
       input_cog:
-        type: File
+        type: string
         inputBinding:
-          prefix: --input_cog
+          prefix: --input_cog=
           separate: false
           position: 1
     outputs:
-      result:
+      results:
         type: Directory
         outputBinding:
-          glob: .
+          glob: "."
+
