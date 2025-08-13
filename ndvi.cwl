@@ -8,8 +8,7 @@ schemas:
 $graph:
   - class: Workflow
     id: ndvi-workflow
-    label: Token Access Test App
-    doc: Test Token Access
+    label: NDVI Calculation workflow
     requirements:
       - class: ResourceRequirement
         coresMax: 1
@@ -18,8 +17,7 @@ $graph:
         networkAccess: true
     inputs:
       input_cog:
-        label: the workspace to test access for
-        doc: workspace to test access
+        label: The cog to calculate NDVI from
         type: string
     outputs:
       - id: results
@@ -41,9 +39,6 @@ $graph:
       - class: ResourceRequirement
         coresMax: 1
         ramMax: 512
-      - class: EnvVarRequirement
-        envDef:
-          WORKSPACE_TOKEN: "<<REPLACE>>"
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
