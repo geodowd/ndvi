@@ -1,10 +1,11 @@
-import shutil
 import argparse
 import sys
 import logging
 from pathlib import Path
 import urllib.request
 import tempfile
+import rasterio
+import numpy as np
 
 
 import datetime as dt
@@ -80,6 +81,44 @@ def create_stac_catalog(output_cog):
     generate_item(item_id, dateNow, output_cog)
 
 
+def ndvi_calculation(input_cog: str, output_ndvi: str, red_band=4, nir_band=8):
+    """
+    Calculate NDVI from a COG file.
+    Args:
+        input_cog: str
+        output_ndvi: str
+        red_band: int
+        nir_band: int
+    Returns:
+        None
+    """
+    print(f"Starting NDVI calculation for {input_cog}")
+    logger.info(f"Starting NDVI calculation for {input_cog}")
+
+    with rasterio.open(input_cog) as src:
+        if red_band > src.count or nir_band > src.count:
+            raise ValueError(
+                f"Band {red_band} or {nir_band} does not exist. File has {src.count} bands."
+            )
+        red = src.read(red_band).astype("float32")
+        nir = src.read(nir_band).astype("float32")
+        profile = src.profile
+    denominator = nir + red
+    ndvi = np.where(denominator != 0, (nir - red) / denominator, 0)
+    ndvi = np.clip(ndvi, -1, 1)
+    logger.info(
+        f"NDVI computed successfully. Shape: {ndvi.shape}, Range: [{ndvi.min():.3f}, {ndvi.max():.3f}]"
+    )
+
+    # Ensure output directory exists
+    output_path = Path(output_ndvi)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    profile.update(dtype="float32", count=1)
+    with rasterio.open(output_ndvi, "w", **profile) as dst:
+        dst.write(ndvi, 1)
+
+
 def parse_args():
     """
     Parse command line arguments.
@@ -123,7 +162,8 @@ if __name__ == "__main__":
         output_cog = output_dir / f"{input_basename}_ndvi.tif"
 
         # Copy the input cog to the output directory
-        shutil.copy2(input_cog_local, output_cog)
+        # shutil.copy2(input_cog_local, output_cog)
+        ndvi_calculation(input_cog_local, output_cog)
 
         # Clean up temporary file if we downloaded one
         if input_cog.startswith(("http://", "https://")) and "temp_path" in locals():

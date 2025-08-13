@@ -47,7 +47,7 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:2
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:ndvi
     baseCommand: ["python3", "/app/run.py"]
     inputs:
       input_cog:
