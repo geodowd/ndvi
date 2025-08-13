@@ -11,14 +11,17 @@ $graph:
     label: NDVI Calculation workflow
     requirements:
       - class: ResourceRequirement
-        coresMax: 1
-        ramMax: 1024
+        coresMax: 4
+        ramMax: 2048
       - class: NetworkAccess
         networkAccess: true
     inputs:
       input_cog:
         label: The cog to calculate NDVI from
         type: string
+      bbox:
+        label: Bounding box
+        type: string?
     outputs:
       - id: results
         type: Directory
@@ -29,6 +32,7 @@ $graph:
         run: "#test-access"
         in:
           input_cog: input_cog
+          bbox: bbox
         out: [results]
 
   - class: CommandLineTool
@@ -42,7 +46,7 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:ndvi
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:bbox_01
     baseCommand: ["python3", "/app/run.py"]
     inputs:
       input_cog:
@@ -51,6 +55,12 @@ $graph:
           prefix: --input_cog=
           separate: false
           position: 1
+      bbox:
+        type: string?
+        inputBinding:
+          prefix: --bbox=
+          separate: false
+          position: 2
     outputs:
       results:
         type: Directory
