@@ -11,7 +11,7 @@ $graph:
     label: NDVI Calculation workflow
     requirements:
       - class: ResourceRequirement
-        coresMax: 4
+        coresMax: 2
         ramMax: 2048
       - class: NetworkAccess
         networkAccess: true
@@ -46,7 +46,7 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:bbox_01
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:ndvi_25
     baseCommand: ["python3", "/app/run.py"]
     inputs:
       input_cog:

@@ -2,3 +2,4 @@ numpy
 rasterio
 rio-cogeo
 pystac
+psutil
