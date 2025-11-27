@@ -544,8 +544,8 @@ def generate_item(item_id: str, date: str, output_cog: str, bbox=None):
             "input_cog": {
                 "href": output_cog,
                 "type": "image/tiff",
-                "title": "Input COG File",
-                "description": "Original COG file used for NDVI calculation",
+                "title": "NDVI Output",
+                "description": "Output NDVI image",
             }
         },
         "links": [
