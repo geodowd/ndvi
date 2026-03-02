@@ -628,12 +628,17 @@ def parse_bbox(bbox_str):
         bbox_str: String in format 'xmin,ymin,xmax,ymax' or 'xmin ymin xmax ymax'
 
     Returns:
-        tuple: (xmin, ymin, xmax, ymax) as floats
+        tuple: (xmin, ymin, xmax, ymax) as floats, or None if no bbox / null-like
 
     Raises:
         ValueError: If bbox format is invalid or coordinates are invalid
     """
     if not bbox_str:
+        return None
+
+    bbox_str = bbox_str.strip()
+    # Treat null-like values as "no bbox" (e.g. from CWL optional input when not provided)
+    if bbox_str.lower() in ("null", "none") or bbox_str == "[]":
         return None
 
     # Try comma-separated format first
@@ -712,8 +717,9 @@ if __name__ == "__main__":
         if args.bbox:
             try:
                 bbox = parse_bbox(args.bbox)
-                print(f"Processing bbox: {bbox}", flush=True)
-                logger.info(f"Processing bbox: {bbox}")
+                if bbox is not None:
+                    print(f"Processing bbox: {bbox}", flush=True)
+                    logger.info(f"Processing bbox: {bbox}")
 
                 # Validate bbox against image bounds if it's a local file
                 if not input_cog.startswith(("http://", "https://")):
