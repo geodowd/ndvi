@@ -1,0 +1,5 @@
+{
+    "inputs": {
+        "input_cog": "https://geodowd-test-data.s3.eu-west-1.amazonaws.com/tiffs/bwl.tif"
+    }
+}

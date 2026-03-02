@@ -1,7 +1,7 @@
 cwlVersion: v1.2
 $namespaces:
   s: https://schema.org/
-s:softwareVersion: 0.1.2
+s:softwareVersion: 0.2.0
 schemas:
   - http://schema.org/version/9.0/schemaorg-current-http.rdf
 
@@ -46,7 +46,7 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:ndvi_35
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:3
     baseCommand: ["python3", "/app/run.py"]
     inputs:
       input_cog:
