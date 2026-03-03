@@ -4,7 +4,7 @@ import logging
 import sys
 from pathlib import Path
 
-from ndvi_core import create_stac_catalog, log_memory_usage, monitor_memory_usage, ndwi_calculation_chunked
+from ndwi_core import create_stac_catalog, log_memory_usage, monitor_memory_usage, ndwi_calculation_chunked
 from stac_io import resolve_input_cog_from_stagein
 
 # Configure logging to flush immediately
@@ -122,9 +122,9 @@ def parse_bbox(bbox_str):
 
 def get_image_bounds(input_cog):
     """
-    Deprecated shim; use ndvi_core.get_image_bounds instead.
+    Deprecated shim; use ndwi_core.get_image_bounds instead.
     """
-    from ndvi_core import get_image_bounds as _core_get_image_bounds
+    from ndwi_core import get_image_bounds as _core_get_image_bounds
 
     return _core_get_image_bounds(input_cog)
 

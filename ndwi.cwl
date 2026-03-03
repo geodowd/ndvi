@@ -1,7 +1,7 @@
 cwlVersion: v1.2
 $namespaces:
   s: https://schema.org/
-s:softwareVersion: 0.2.6
+s:softwareVersion: 0.2.7
 schemas:
   - http://schema.org/version/9.0/schemaorg-current-http.rdf
 
@@ -42,7 +42,7 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:ndwi_0.2.6
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:ndwi_0.2.7
     baseCommand: ["python3", "/app/run.py"]
     inputs:
       stac_item_dir:
