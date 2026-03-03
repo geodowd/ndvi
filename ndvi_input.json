@@ -1,5 +1,6 @@
 {
     "inputs": {
-        "input_cog": "https://geodowd-test-data.s3.eu-west-1.amazonaws.com/tiffs/bwl.tif"
+        "staged_item_dir": "https://eodatahub.org.uk/api/catalogue/stac/catalogs/public/catalogs/ceda-stac-catalogue/collections/sentinel2_ard/items/neodc.sentinel_ard.data.sentinel_2.2025.12.31.S2A_20251231_latn519lonw0037_T30UVC_ORB037_20251231135221_utm30n_osgb",
+        "bbox": "-3.371033,51.630166,-3.341507,51.641286"
     }
 }
