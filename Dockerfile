@@ -1,17 +1,43 @@
-FROM python:3.12.0-slim AS builder
-LABEL authors="Sparkgeo UK"
+# Build stage
+FROM python:3.12-alpine AS builder
 
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
-ADD requirements.txt /tmp/requirements.txt
+# Install build dependencies
+RUN apk add --no-cache \
+    expat \
+    gdal \
+    gdal-dev \
+    gcc \
+    g++ \
+    musl-dev \
+    python3-dev \
+    linux-headers \
+    && rm -rf /var/cache/apk/*
 
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+COPY ./requirements.txt /app
 
+# Install Python packages (this will compile rasterio and other packages)
+RUN pip install --no-cache-dir -r requirements.txt
 
-FROM python:3.12.0-slim
+# Runtime stage
+FROM python:3.12-alpine AS runtime
+
+WORKDIR /app
+
+# Install only runtime dependencies (no build tools)
+RUN apk add --no-cache \
+    expat \
+    gdal \
+    && rm -rf /var/cache/apk/*
+
+# Copy Python packages from builder stage
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/bin /usr/bin
-COPY . /usr/bin/
-RUN chmod +x /usr/bin/*.py
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy application code
+COPY ./*.py /app
+
+CMD ["python3", "-u", "run.py"]
+
+

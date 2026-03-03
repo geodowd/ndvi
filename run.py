@@ -1,16 +1,11 @@
-import rasterio
-import numpy as np
 import argparse
-import os
-import sys
+import gc
 import logging
+import sys
 from pathlib import Path
 
-from rasterio.errors import RasterioIOError
-
-import datetime as dt
-import json
-import time
+from ndvi_core import create_stac_catalog, log_memory_usage, monitor_memory_usage, ndvi_calculation_chunked
+from stac_io import resolve_input_cog_from_stagein
 
 # Configure logging to flush immediately
 logging.basicConfig(
@@ -23,178 +18,205 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def generate_catalog(cat_id: str, item_id: str):
-    data = {
-        "stac_version": "1.0.0",
-        "id": cat_id,
-        "type": "Catalog",
-        "description": "Root catalog",
-        "links": [
-            {"type": "application/geo+json", "rel": "item", "href": f"{item_id}.json"},
-            {"type": "application/json", "rel": "self", "href": f"{cat_id}.json"},
-        ],
-    }
-    with open("./catalog.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-
-
-def generate_item(cat_id: str, item_id: str, date: str, output_cog: str):
-    data = {
-        "stac_version": "1.0.0",
-        "id": item_id,
-        "type": "Feature",
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [
-                [[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]
-            ],
-        },
-        "properties": {"created": date, "datetime": date, "updated": date},
-        "bbox": [-180, -90, 180, 90],
-        "assets": {
-            "input_cog": {
-                "href": output_cog,
-                "type": "image/tiff",
-                "title": "Input COG File",
-                "description": "Original COG file used for NDVI calculation",
-            }
-        },
-        "links": [
-            {"type": "application/json", "rel": "parent", "href": "catalog.json"},
-            {"type": "application/geo+json", "rel": "self", "href": f"{item_id}.json"},
-            {"type": "application/json", "rel": "root", "href": "catalog.json"},
-        ],
-    }
-
-    with open(f"./{item_id}.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-
-
-def create_stac_catalog(output_cog):
-    cat_id = output_cog.split("/")[-1].split(".")[0]
-    item_id = output_cog.split("/")[-1].split(".")[0]
-    now = time.time_ns() / 1_000_000_000
-    dateNow = dt.datetime.fromtimestamp(now)
-    dateNow = dateNow.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
-    # Generate STAC Catalog
-    generate_catalog(cat_id, item_id)
-    # Generate STAC Item
-    generate_item(cat_id, item_id, dateNow, output_cog)
-
-
-def validate_file_exists(file_path: str, description: str):
-    """Validate that a file exists and is not empty."""
-    # Check if it's a URL
-    if file_path.startswith(("http://", "https://", "s3://")):
-        logger.info(f"Input is a URL: {file_path}")
-        # For URLs, we'll validate when we actually try to read them
-        return
-
-    # Local file validation
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"{description} does not exist: {file_path}")
-    if os.path.getsize(file_path) == 0:
-        raise RuntimeError(f"{description} is empty: {file_path}")
-    logger.info(
-        f"Validated {description}: {file_path} ({os.path.getsize(file_path)} bytes)"
-    )
-
-
-def ndvi_calculation(input_cog: str, output_ndvi: str, red_band=4, nir_band=8):
-    """
-    Calculate NDVI from a COG file.
-    Args:
-        input_cog: str
-        output_ndvi: str
-        red_band: int
-        nir_band: int
-    Returns:
-        None
-    """
-    print(f"Starting NDVI calculation for {input_cog}")
-    logger.info(f"Starting NDVI calculation for {input_cog}")
-
-    try:
-        # Validate input file exists
-        validate_file_exists(input_cog, "Input COG file")
-
-        with rasterio.open(input_cog) as src:
-            if red_band > src.count or nir_band > src.count:
-                raise ValueError(
-                    f"Band {red_band} or {nir_band} does not exist. File has {src.count} bands."
-                )
-            red = src.read(red_band).astype("float32")
-            nir = src.read(nir_band).astype("float32")
-            profile = src.profile
-        denominator = nir + red
-        ndvi = np.where(denominator != 0, (nir - red) / denominator, 0)
-        ndvi = np.clip(ndvi, -1, 1)
-        logger.info(
-            f"NDVI computed successfully. Shape: {ndvi.shape}, Range: [{ndvi.min():.3f}, {ndvi.max():.3f}]"
-        )
-
-        # Ensure output directory exists
-        output_path = Path(output_ndvi)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        profile.update(dtype="float32", count=1)
-        with rasterio.open(output_ndvi, "w", **profile) as dst:
-            dst.write(ndvi, 1)
-        validate_file_exists(output_ndvi, "NDVI output file")
-
-    except RasterioIOError as e:
-        logger.error(f"Error reading input file: {e}")
-        raise
-    except ValueError as e:
-        logger.error(f"Validation error: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in NDVI calculation: {e}")
-        raise
-
-
 def parse_args():
     """
     Parse command line arguments.
     """
     parser = argparse.ArgumentParser(description="Calculate NDVI from a COG file.")
-    parser.add_argument("--input_cog", type=str, required=True, help="Input COG file.")
+    parser.add_argument(
+        "--stac_item_dir",
+        type=str,
+        required=True,
+        help="Directory containing staged STAC Item from ADES stage-in",
+    )
+    parser.add_argument(
+        "--bbox",
+        type=str,
+        help="Bounding box in format 'xmin,ymin,xmax,ymax' or 'xmin ymin xmax ymax' (longitude latitude coordinates)",
+    )
+    parser.add_argument(
+        "--chunk_width",
+        type=int,
+        help="Custom chunk width in pixels for memory optimization (default: auto-calculated)",
+    )
+    parser.add_argument(
+        "--chunk_height",
+        type=int,
+        help="Custom chunk height in pixels for memory optimization (default: auto-calculated)",
+    )
+    parser.add_argument(
+        "--max_memory_mb",
+        type=int,
+        help="Maximum memory to use in MB (default: auto-detected from system)",
+    )
+    parser.add_argument(
+        "--monitor_memory",
+        action="store_true",
+        help="Enable continuous memory monitoring during processing",
+    )
+    parser.add_argument(
+        "--memory_interval",
+        type=int,
+        default=10,
+        help="Memory monitoring interval in seconds (default: 10)",
+    )
     return parser.parse_args()
+
+
+def parse_bbox(bbox_str):
+    """
+    Parse bbox string in various formats and validate coordinates.
+
+    Args:
+        bbox_str: String in format 'xmin,ymin,xmax,ymax' or 'xmin ymin xmax ymax'
+
+    Returns:
+        tuple: (xmin, ymin, xmax, ymax) as floats, or None if no bbox / null-like
+
+    Raises:
+        ValueError: If bbox format is invalid or coordinates are invalid
+    """
+    if not bbox_str:
+        return None
+
+    bbox_str = bbox_str.strip()
+    # Treat null-like values as "no bbox" (e.g. from CWL optional input when not provided)
+    if bbox_str.lower() in ("null", "none") or bbox_str == "[]":
+        return None
+
+    # Try comma-separated format first
+    if "," in bbox_str:
+        parts = bbox_str.split(",")
+    else:
+        # Try space-separated format
+        parts = bbox_str.split()
+
+    if len(parts) != 4:
+        raise ValueError("Bbox must have exactly 4 values: xmin, ymin, xmax, ymax")
+
+    try:
+        xmin, ymin, xmax, ymax = map(float, parts)
+    except ValueError:
+        raise ValueError("All bbox values must be valid numbers")
+
+    # Validate coordinate ranges
+    if xmin >= xmax:
+        raise ValueError("xmin must be less than xmax")
+    if ymin >= ymax:
+        raise ValueError("ymin must be less than ymax")
+
+    # Validate longitude range (-180 to 180)
+    if xmin < -180 or xmax > 180:
+        raise ValueError("Longitude values must be between -180 and 180")
+
+    # Validate latitude range (-90 to 90)
+    if ymin < -90 or ymax > 90:
+        raise ValueError("Latitude values must be between -90 and 90")
+
+    # Check if bbox is too small (less than 0.001 degrees in either dimension)
+    if (xmax - xmin) < 0.001 or (ymax - ymin) < 0.001:
+        raise ValueError("Bbox is too small. Minimum size is 0.001 degrees in both dimensions")
+
+    return xmin, ymin, xmax, ymax
+
+
+def get_image_bounds(input_cog):
+    """
+    Deprecated shim; use ndvi_core.get_image_bounds instead.
+    """
+    from ndvi_core import get_image_bounds as _core_get_image_bounds
+
+    return _core_get_image_bounds(input_cog)
 
 
 if __name__ == "__main__":
     logger.info("Starting NDVI processing pipeline...")
     print("Starting NDVI processing pipeline....", flush=True)
+
+    # Log initial memory state
+    log_memory_usage("at pipeline start")
+
     try:
         args = parse_args()
-        print(f"Input COG file: {args.input_cog}", flush=True)
-        input_cog = args.input_cog
+
+        # Start memory monitoring if requested
+        monitor_thread = None
+        if args.monitor_memory:
+            logger.info("Starting memory monitoring")
+            monitor_thread = monitor_memory_usage(args.memory_interval)
+
+        # Resolve input COG from staged STAC Item directory
+        stac_item_dir = Path(args.stac_item_dir)
+        if not stac_item_dir.exists() or not stac_item_dir.is_dir():
+            logger.error(f"STAC item directory does not exist or is not a directory: {stac_item_dir}")
+            sys.exit(1)
+
+        logger.info(f"STAC item directory: {stac_item_dir}")
+        input_cog_local = resolve_input_cog_from_stagein(stac_item_dir)
+        logger.info(f"Resolved input COG from staged STAC to: {input_cog_local}")
+        print(f"Resolved input COG from staged STAC to: {input_cog_local}", flush=True)
+
+        # Parse bbox if provided
+        bbox = None
+        if args.bbox:
+            try:
+                bbox = parse_bbox(args.bbox)
+                if bbox is not None:
+                    print(f"Processing bbox: {bbox}", flush=True)
+                    logger.info(f"Processing bbox: {bbox}")
+
+                # Validate bbox against image bounds
+                try:
+                    image_bounds = get_image_bounds(input_cog_local)
+                    logger.info(f"Image bounds: {image_bounds}")
+
+                    # Check if bbox overlaps with image bounds
+                    xmin, ymin, xmax, ymax = bbox
+                    img_xmin, img_ymin, img_xmax, img_ymax = image_bounds
+
+                    if xmax < img_xmin or xmin > img_xmax or ymax < img_ymin or ymin > img_ymax:
+                        logger.warning("Bbox is outside image boundaries - this may result in an empty output")
+
+                except Exception as e:
+                    logger.warning(f"Could not validate bbox against image bounds: {e}")
+
+            except ValueError as e:
+                logger.error(f"Invalid bbox: {e}")
+                sys.exit(1)
 
         # Create dedicated output directory
         output_dir = Path("output_ndvi")
         output_dir.mkdir(exist_ok=True)
 
-        # validate_file_exists(input_cog, "Input file")
-        # print(f"Input file validated: {input_cog}", flush=True)
-        # Create output filenames
-        input_basename = Path(input_cog).stem
-        output_cog = output_dir / f"{input_basename}_ndvi.tif"
-        temp_cog = output_dir / f"{input_basename}_temp.tif"
+        input_basename = Path(input_cog_local).stem
 
-        # ndvi_calculation(input_cog, str(temp_cog))
-        # print(f"NDVI calculation completed: {temp_cog}", flush=True)
-        # rio_copy(str(temp_cog), str(output_cog), driver="COG", dtype="float32")
-        # print(f"COG conversion completed: {output_cog}", flush=True)
+        # Generate output filename based on whether bbox is provided
+        if bbox:
+            xmin, ymin, xmax, ymax = bbox
+            output_cog = output_dir / f"{input_basename}_ndvi_{xmin}_{ymin}_{xmax}_{ymax}.tif"
+        else:
+            output_cog = output_dir / f"{input_basename}_ndvi.tif"
 
-        # Validate output file was created
-        # validate_file_exists(str(output_cog), "NDVI output file")
+        # Determine chunk size
+        chunk_size = None
+        if args.chunk_width and args.chunk_height:
+            chunk_size = (args.chunk_width, args.chunk_height)
+            logger.info(f"Using custom chunk size: {chunk_size}")
+        elif args.chunk_width or args.chunk_height:
+            logger.warning("Both chunk_width and chunk_height must be specified, using auto-calculation")
 
-        # Clean up temporary file
-        # if temp_cog.exists():
-        # temp_cog.unlink()
+        # Process the NDVI calculation with chunked processing
+        log_memory_usage("before NDVI calculation")
+        ndvi_calculation_chunked(input_cog_local, output_cog, bbox=bbox, chunk_size=chunk_size)
 
-        # print(f"Creating STAC catalog: {output_cog}", flush=True)
-        create_stac_catalog(str(output_cog))
+        # Create STAC catalog
+        log_memory_usage("before STAC creation")
+        create_stac_catalog(str(output_cog), bbox)
+        log_memory_usage("after STAC creation")
+
+        logger.info("NDVI processing pipeline completed successfully")
+        print("NDVI processing pipeline completed successfully", flush=True)
+
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
         sys.exit(1)
@@ -207,3 +229,7 @@ if __name__ == "__main__":
 
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)
+    finally:
+        # Final cleanup and memory logging
+        gc.collect()
+        log_memory_usage("at pipeline end")

@@ -1,50 +1,66 @@
-cwlVersion: v1.0
+cwlVersion: v1.2
+$namespaces:
+  s: https://schema.org/
+s:softwareVersion: 0.2.5
+schemas:
+  - http://schema.org/version/9.0/schemaorg-current-http.rdf
+
 $graph:
   - class: Workflow
     id: ndvi-workflow
-    label: NDVI Processing Workflow
-    doc: >
-      The NDVI workflow will calculate Normalized Difference Vegetation Index from satellite imagery.
+    label: NDVI Calculation workflow
     requirements:
-      ResourceRequirement:
-        coresMax: 4
-        ramMax: 4096
+      - class: ResourceRequirement
+        coresMax: 2
+        ramMax: 2048
     inputs:
-      input_cog:
-        type: File
-        doc: Input COG file for NDVI calculation
+      staged_item_dir:
+        label: Directory containing staged STAC Item (from stage-in)
+        type: Directory
+      bbox:
+        label: Bounding box
+        type: string?
     outputs:
-      - id: asset-result
+      - id: results
         type: Directory
         outputSource:
-          - ndvi-calculation/result
+          - test-access/results
     steps:
-      ndvi-calculation:
-        run: "#ndvi-calculation-tool"
+      test-access:
+        run: "#test-access"
         in:
-          input_cog: input_cog
-        out:
-          - result
+          stac_item_dir: staged_item_dir
+          bbox: bbox
+        out: [results]
 
   - class: CommandLineTool
-    id: ndvi-calculation-tool
+    id: test-access
     requirements:
-      ResourceRequirement:
-        coresMax: 4
-        ramMax: 4096
+      - class: ResourceRequirement
+        coresMax: 1
+        ramMax: 512
+      - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:simples
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:0.2.5
     baseCommand: ["python3", "/app/run.py"]
     inputs:
-      input_cog:
-        type: File
+      stac_item_dir:
+        type: Directory
         inputBinding:
-          prefix: --input_cog
+          prefix: --stac_item_dir=
           separate: false
+          valueFrom: $(self.path)
           position: 1
+      bbox:
+        type: string?
+        inputBinding:
+          prefix: --bbox=
+          separate: false
+          position: 2
     outputs:
-      result:
+      results:
         type: Directory
         outputBinding:
-          glob: .
+          glob: "."
+
