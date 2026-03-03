@@ -1,7 +1,7 @@
 cwlVersion: v1.2
 $namespaces:
   s: https://schema.org/
-s:softwareVersion: 0.2.1
+s:softwareVersion: 0.2.5
 schemas:
   - http://schema.org/version/9.0/schemaorg-current-http.rdf
 
@@ -13,12 +13,10 @@ $graph:
       - class: ResourceRequirement
         coresMax: 2
         ramMax: 2048
-      - class: NetworkAccess
-        networkAccess: true
     inputs:
-      input_cog:
-        label: The cog to calculate NDVI from
-        type: string
+      staged_item_dir:
+        label: Directory containing staged STAC Item (from stage-in)
+        type: Directory
       bbox:
         label: Bounding box
         type: string?
@@ -31,29 +29,28 @@ $graph:
       test-access:
         run: "#test-access"
         in:
-          input_cog: input_cog
+          stac_item_dir: staged_item_dir
           bbox: bbox
         out: [results]
 
   - class: CommandLineTool
     id: test-access
     requirements:
-      - class: NetworkAccess
-        networkAccess: true
       - class: ResourceRequirement
         coresMax: 1
         ramMax: 512
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:4
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:0.2.5
     baseCommand: ["python3", "/app/run.py"]
     inputs:
-      input_cog:
-        type: string
+      stac_item_dir:
+        type: Directory
         inputBinding:
-          prefix: --input_cog=
+          prefix: --stac_item_dir=
           separate: false
+          valueFrom: $(self.path)
           position: 1
       bbox:
         type: string?

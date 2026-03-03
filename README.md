@@ -34,37 +34,33 @@ uv sync
 
 ## Usage
 
-### Basic NDVI Calculation
+### Running under ADES with stage-in
 
-Process an entire COG file:
+In the ADES environment, you do not call `run.py` directly. Instead:
 
-```bash
-python run.py --input_cog path/to/input.tif
-```
+- You submit a job to the Workflow Runner with a **single STAC Item reference** (HTTP/HTTPS URL, local path, or S3 URI).
+- The ADES **stage-in** component fetches the STAC Item and its assets and writes a local STAC Catalog on disk.
+- The `ndvi.cwl` workflow receives a `Directory` input (from stage-in) and passes it to `run.py` as `--stac_item_dir`.
 
-### Bbox-based Processing
+The NDVI tool then:
 
-Process only a specific geographic region:
+- Locates the staged STAC Item JSON within `--stac_item_dir`.
+- Selects an appropriate asset from the item (for example, a `data` or `cog` asset).
+- Resolves the asset `href` to a local COG path.
+- Runs NDVI processing on that local file, optionally constrained by a `--bbox` parameter.
 
-```bash
-# Comma-separated format
-python run.py --input_cog path/to/input.tif --bbox "-122.5,37.5,-122.0,38.0"
+### Local CLI usage (advanced)
 
-# Space-separated format
-python run.py --input_cog path/to/input.tif --bbox "-122.5 37.5 -122.0 38.0"
-```
-
-### Processing from URLs
-
-Process COG files directly from HTTP/HTTPS URLs:
+While the primary usage is via ADES and stage-in, you can also run the tool locally by mimicking the staged structure:
 
 ```bash
-# Full image processing (downloads entire file)
-python run.py --input_cog "https://example.com/data.tif"
-
-# Bbox processing (uses HTTP range requests, no download)
-python run.py --input_cog "https://example.com/data.tif" --bbox "-122.5,37.5,-122.0,38.0"
+python run.py --stac_item_dir /path/to/staged_item_dir --bbox "-122.5,37.5,-122.0,38.0"
 ```
+
+Where `/path/to/staged_item_dir` contains:
+
+- `catalog.json`
+- A STAC Item JSON file with an `assets` entry that points (via a relative `href`) to the input COG.
 
 ## Bbox Format
 
@@ -124,28 +120,6 @@ To modify these defaults, edit the `ndvi_calculation` function in `run.py`.
 - **Input**: Supports any coordinate reference system (CRS) that rasterio can handle
 - **Bbox**: Must be provided in WGS84 (EPSG:4326) coordinates (longitude/latitude)
 - **Output**: Maintains the same CRS as the input file
-
-## Examples
-
-### Local File Processing
-
-```bash
-# Process local file
-python run.py --input_cog /path/to/satellite_data.tif
-
-# Process specific region
-python run.py --input_cog /path/to/satellite_data.tif --bbox "10.0,45.0,11.0,46.0"
-```
-
-### Remote File Processing
-
-```bash
-# Process entire remote file
-python run.py --input_cog "https://storage.googleapis.com/gcp-public-data-landsat/LC08/01/044/034/LC08_L1TP_044034_20131230_20170307_01_T1/LC08_L1TP_044034_20131230_20170307_01_T1_B4.TIF"
-
-# Process specific region
-python run.py --input_cog "https://storage.googleapis.com/gcp-public-data-landsat/LC08/01/044/034/LC08_L1TP_044034_20131230_20170307_01_T1/LC08_L1TP_044034_20131230_20170307_01_T1_B4.TIF" --bbox "-122.5,37.5,-122.0,38.0"
-```
 
 ## Testing
 
