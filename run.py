@@ -4,7 +4,7 @@ import logging
 import sys
 from pathlib import Path
 
-from ndvi_core import create_stac_catalog, log_memory_usage, monitor_memory_usage, ndvi_calculation_chunked
+from ndvi_core import create_stac_catalog, log_memory_usage, monitor_memory_usage, ndwi_calculation_chunked
 from stac_io import resolve_input_cog_from_stagein
 
 # Configure logging to flush immediately
@@ -22,7 +22,7 @@ def parse_args():
     """
     Parse command line arguments.
     """
-    parser = argparse.ArgumentParser(description="Calculate NDVI from a COG file.")
+    parser = argparse.ArgumentParser(description="Calculate NDWI (McFeeters) from a COG file.")
     parser.add_argument(
         "--stac_item_dir",
         type=str,
@@ -130,8 +130,8 @@ def get_image_bounds(input_cog):
 
 
 if __name__ == "__main__":
-    logger.info("Starting NDVI processing pipeline...")
-    print("Starting NDVI processing pipeline....", flush=True)
+    logger.info("Starting NDWI processing pipeline...")
+    print("Starting NDWI processing pipeline....", flush=True)
 
     # Log initial memory state
     log_memory_usage("at pipeline start")
@@ -185,7 +185,7 @@ if __name__ == "__main__":
                 sys.exit(1)
 
         # Create dedicated output directory
-        output_dir = Path("output_ndvi")
+        output_dir = Path("output_ndwi")
         output_dir.mkdir(exist_ok=True)
 
         input_basename = Path(input_cog_local).stem
@@ -193,9 +193,9 @@ if __name__ == "__main__":
         # Generate output filename based on whether bbox is provided
         if bbox:
             xmin, ymin, xmax, ymax = bbox
-            output_cog = output_dir / f"{input_basename}_ndvi_{xmin}_{ymin}_{xmax}_{ymax}.tif"
+            output_cog = output_dir / f"{input_basename}_ndwi_{xmin}_{ymin}_{xmax}_{ymax}.tif"
         else:
-            output_cog = output_dir / f"{input_basename}_ndvi.tif"
+            output_cog = output_dir / f"{input_basename}_ndwi.tif"
 
         # Determine chunk size
         chunk_size = None
@@ -205,17 +205,17 @@ if __name__ == "__main__":
         elif args.chunk_width or args.chunk_height:
             logger.warning("Both chunk_width and chunk_height must be specified, using auto-calculation")
 
-        # Process the NDVI calculation with chunked processing
-        log_memory_usage("before NDVI calculation")
-        ndvi_calculation_chunked(input_cog_local, output_cog, bbox=bbox, chunk_size=chunk_size)
+        # Process the NDWI calculation with chunked processing
+        log_memory_usage("before NDWI calculation")
+        ndwi_calculation_chunked(input_cog_local, output_cog, bbox=bbox, chunk_size=chunk_size)
 
         # Create STAC catalog
         log_memory_usage("before STAC creation")
         create_stac_catalog(str(output_cog), bbox)
         log_memory_usage("after STAC creation")
 
-        logger.info("NDVI processing pipeline completed successfully")
-        print("NDVI processing pipeline completed successfully", flush=True)
+        logger.info("NDWI processing pipeline completed successfully")
+        print("NDWI processing pipeline completed successfully", flush=True)
 
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
@@ -224,7 +224,7 @@ if __name__ == "__main__":
         logger.error(f"Validation error: {e}")
         sys.exit(1)
     except Exception as e:
-        logger.error(f"NDVI processing pipeline failed: {e}")
+        logger.error(f"NDWI processing pipeline failed: {e}")
         import traceback
 
         traceback.print_exc(file=sys.stderr)

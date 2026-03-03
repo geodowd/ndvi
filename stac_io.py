@@ -53,7 +53,7 @@ def resolve_input_cog_from_stagein(stac_item_dir: Path) -> Path:
     except Exception as e:  # pragma: no cover - defensive logging
         logger.warning(f"Could not list item root contents: {e}")
 
-    # Choose an asset for NDVI input (only from preferred keys; no fallback)
+    # Choose an asset for NDWI input (only from preferred keys; no fallback)
     preferred_keys = ["cog", "cog_rgb"]
     chosen_asset = None
     chosen_asset_key = None
@@ -61,7 +61,7 @@ def resolve_input_cog_from_stagein(stac_item_dir: Path) -> Path:
         if key in assets:
             chosen_asset = assets[key]
             chosen_asset_key = key
-            logger.info(f"Using asset '{key}' from STAC Item as NDVI input")
+            logger.info(f"Using asset '{key}' from STAC Item as NDWI input")
             break
 
     if chosen_asset is None:
@@ -91,5 +91,5 @@ def resolve_input_cog_from_stagein(stac_item_dir: Path) -> Path:
                 f"item_root={item_root} or stac_item_dir={stac_item_dir}"
             )
 
-    logger.info(f"NDVI input: asset_key={chosen_asset_key!r}, path={input_cog_local}")
+    logger.info(f"NDWI input: asset_key={chosen_asset_key!r}, path={input_cog_local}")
     return input_cog_local

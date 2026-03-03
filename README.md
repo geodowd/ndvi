@@ -1,10 +1,10 @@
-# NDVI Processing Pipeline
+# NDWI Processing Pipeline
 
-A Python-based pipeline for calculating Normalized Difference Vegetation Index (NDVI) from Cloud-Optimized GeoTIFF (COG) files with support for bounding box (bbox) processing.
+A Python-based pipeline for calculating Normalized Difference Water Index (NDWI) from Cloud-Optimized GeoTIFF (COG) files with support for bounding box (bbox) processing.
 
 ## Features
 
-- **NDVI Calculation**: Compute NDVI from COG files using specified red and NIR bands
+- **NDWI Calculation**: Compute NDWI (McFeeters) from COG files using specified green and NIR bands
 - **Bbox Processing**: Process only specific geographic regions without downloading entire files
 - **Multiple Input Formats**: Support for both local files and HTTP/HTTPS URLs
 - **STAC Metadata**: Generate STAC (SpatioTemporal Asset Catalog) metadata for outputs
@@ -40,24 +40,24 @@ In the ADES environment, you do not call `run.py` directly. Instead:
 
 - You submit a job to the Workflow Runner with a **single STAC Item reference** (HTTP/HTTPS URL, local path, or S3 URI).
 - The ADES **stage-in** component fetches the STAC Item and its assets and writes a local STAC Catalog on disk.
-- The `ndvi.cwl` workflow receives a `Directory` input (from stage-in) and passes it to `run.py` as `--stac_item_dir`.
+- The `ndwi.cwl` workflow receives a `Directory` input (from stage-in) and passes it to `run.py` as `--stac_item_dir`.
 
-The NDVI tool then:
+The NDWI tool then:
 
 - Locates the staged STAC Item JSON within `--stac_item_dir`.
 - Selects an appropriate asset from the item (for example, a `data` or `cog` asset).
 - Resolves the asset `href` to a local COG path.
-- Runs NDVI processing on that local file, optionally constrained by a `--bbox` parameter.
+- Runs NDWI processing on that local file, optionally constrained by a `--bbox` parameter.
 
 ### Local CLI usage (advanced)
 
 While the primary usage is via ADES and stage-in, you can also run the tool locally by mimicking the staged structure:
 
 ```bash
-python run.py --stac_item_dir /path/to/staged_item_dir --bbox "-122.5,37.5,-122.0,38.0"
+python run.py --stac_item_dir /path/to/stac_item --bbox "-122.5,37.5,-122.0,38.0"
 ```
 
-Where `/path/to/staged_item_dir` contains:
+Where `/path/to/stac_item` contains:
 
 - `catalog.json`
 - A STAC Item JSON file with an `assets` entry that points (via a relative `href`) to the input COG.
@@ -80,13 +80,13 @@ The `--bbox` parameter accepts coordinates in the following format:
 
 ### Files Generated
 
-- **NDVI GeoTIFF**: `{input_basename}_ndvi.tif` (full image) or `{input_basename}_ndvi_{xmin}_{ymin}_{xmax}_{ymax}.tif` (bbox)
+- **NDWI GeoTIFF**: `{input_basename}_ndwi.tif` (full image) or `{input_basename}_ndwi_{xmin}_{ymin}_{xmax}_{ymax}.tif` (bbox)
 - **STAC Catalog**: `catalog.json`
 - **STAC Item**: `{item_id}.json`
 
 ### Output Directory
 
-All outputs are saved to the `output_ndvi/` directory.
+All outputs are saved to the `output_ndwi/` directory.
 
 ## STAC Metadata
 
@@ -108,12 +108,12 @@ The pipeline includes comprehensive error handling:
 
 ### Band Selection
 
-Default bands used for NDVI calculation:
+Default bands used for NDWI (McFeeters) calculation:
 
-- **Red Band**: 4
+- **Green Band**: 3
 - **NIR Band**: 8
 
-To modify these defaults, edit the `ndvi_calculation` function in `run.py`.
+To modify these defaults, edit the NDWI calculation functions in `ndwi_core.py`.
 
 ### Coordinate System
 
@@ -135,10 +135,10 @@ Build and run using Docker:
 
 ```bash
 # Build image
-docker build -t ndvi-pipeline .
+docker build -t ndwi-pipeline .
 
 # Run with bbox processing
-docker run -v $(pwd):/workspace ndvi-pipeline python run.py --input_cog input.tif --bbox "-122.5,37.5,-122.0,38.0"
+docker run -v $(pwd):/workspace ndwi-pipeline python run.py --input_cog input.tif --bbox "-122.5,37.5,-122.0,38.0"
 ```
 
 ## Troubleshooting

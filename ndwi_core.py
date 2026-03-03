@@ -89,11 +89,11 @@ def calculate_optimal_chunk_size(
     return chunk_width, chunk_height
 
 
-def process_chunk(red_chunk, nir_chunk):
-    """Process a single chunk to calculate NDVI."""
-    denominator = nir_chunk + red_chunk
-    ndvi = np.where(denominator != 0, (nir_chunk - red_chunk) / denominator, 0)
-    return np.clip(ndvi, -1, 1).astype("float32")
+def process_chunk(green_chunk, nir_chunk):
+    """Process a single chunk to calculate NDWI (McFeeters)."""
+    denominator = green_chunk + nir_chunk
+    ndwi = np.where(denominator != 0, (green_chunk - nir_chunk) / denominator, 0)
+    return np.clip(ndwi, -1, 1).astype("float32")
 
 
 def debug_coordinate_mapping(
@@ -133,19 +133,19 @@ def validate_processing_window(window, image_width: int, image_height: int) -> b
     return True
 
 
-def ndvi_calculation_chunked(
+def ndwi_calculation_chunked(
     input_cog: str,
-    output_ndvi: str,
-    red_band: int = 4,
+    output_ndwi: str,
+    green_band: int = 3,
     nir_band: int = 8,
     bbox=None,
     chunk_size=None,
 ):
     """
-    Calculate NDVI from a COG file using chunked processing for memory efficiency.
+    Calculate NDWI (McFeeters) from a COG file using chunked processing for memory efficiency.
     """
-    print(f"Starting chunked NDVI calculation for {input_cog}")
-    logger.info(f"Starting chunked NDVI calculation for {input_cog}")
+    print(f"Starting chunked NDWI calculation for {input_cog}")
+    logger.info(f"Starting chunked NDWI calculation for {input_cog}")
     log_memory_usage("at start")
 
     if bbox:
@@ -153,8 +153,8 @@ def ndvi_calculation_chunked(
         logger.info(f"Processing bbox: {bbox}")
 
     with rasterio.open(input_cog) as src:
-        if red_band > src.count or nir_band > src.count:
-            raise ValueError(f"Band {red_band} or {nir_band} does not exist. " f"File has {src.count} bands.")
+        if green_band > src.count or nir_band > src.count:
+            raise ValueError(f"Band {green_band} or {nir_band} does not exist. File has {src.count} bands.")
 
         if bbox:
             xmin, ymin, xmax, ymax = bbox
@@ -224,7 +224,7 @@ def ndvi_calculation_chunked(
         logger.info(f"Processing window: {process_window.width}x{process_window.height}")
 
         if not validate_processing_window(process_window, src.width, src.height):
-            raise ValueError(f"Processing window {process_window} is outside image bounds " f"{src.width}x{src.height}")
+            raise ValueError(f"Processing window {process_window} is outside image bounds {src.width}x{src.height}")
 
         profile = src.profile.copy()
         profile.update(
@@ -237,10 +237,10 @@ def ndvi_calculation_chunked(
             }
         )
 
-        output_path = Path(output_ndvi)
+        output_path = Path(output_ndwi)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with rasterio.open(output_ndvi, "w", **profile) as dst:
+        with rasterio.open(output_ndwi, "w", **profile) as dst:
             chunks_x = int(np.ceil(process_window.width / chunk_width))
             chunks_y = int(np.ceil(process_window.height / chunk_height))
 
@@ -254,7 +254,7 @@ def ndvi_calculation_chunked(
             )
             logger.info(f"Input image dimensions: {src.width}x{src.height}")
             logger.info(f"Output image dimensions: {process_window.width}x{process_window.height}")
-            logger.info("Coordinate system: Input uses absolute coordinates, " "Output uses relative coordinates (0,0)")
+            logger.info("Coordinate system: Input uses absolute coordinates, Output uses relative coordinates (0,0)")
             log_memory_usage("before chunk processing")
 
             for chunk_y in range(chunks_y):
@@ -311,13 +311,13 @@ def ndvi_calculation_chunked(
                         continue
 
                     try:
-                        red_chunk = src.read(red_band, window=input_chunk_window).astype("float32")
+                        green_chunk = src.read(green_band, window=input_chunk_window).astype("float32")
                         nir_chunk = src.read(nir_band, window=input_chunk_window).astype("float32")
 
-                        ndvi_chunk = process_chunk(red_chunk, nir_chunk)
-                        dst.write(ndvi_chunk, 1, window=output_chunk_window)
+                        ndwi_chunk = process_chunk(green_chunk, nir_chunk)
+                        dst.write(ndwi_chunk, 1, window=output_chunk_window)
 
-                        del red_chunk, nir_chunk, ndvi_chunk
+                        del green_chunk, nir_chunk, ndwi_chunk
                         gc.collect()
                     except Exception as e:  # pragma: no cover - defensive logging
                         logger.error(f"Error processing chunk at ({chunk_x}, {chunk_y}): {e}")
@@ -331,19 +331,19 @@ def ndvi_calculation_chunked(
                         logger.info(f"Processed {chunk_num}/{chunks_x * chunks_y} chunks")
                         log_memory_usage(f"after chunk {chunk_num}")
 
-        logger.info("NDVI computation completed successfully")
+        logger.info("NDWI computation completed successfully")
         log_memory_usage("after completion")
 
 
-def ndvi_calculation(
+def ndwi_calculation(
     input_cog: str,
-    output_ndvi: str,
-    red_band: int = 4,
+    output_ndwi: str,
+    green_band: int = 3,
     nir_band: int = 8,
     bbox=None,
 ):
-    """Legacy wrapper for the chunked NDVI calculation."""
-    return ndvi_calculation_chunked(input_cog, output_ndvi, red_band, nir_band, bbox)
+    """Legacy wrapper for the chunked NDWI calculation."""
+    return ndwi_calculation_chunked(input_cog, output_ndwi, green_band, nir_band, bbox)
 
 
 def generate_catalog(item_id: str) -> None:
@@ -376,8 +376,8 @@ def generate_item(item_id: str, date: str, output_cog: str, bbox=None) -> None:
             "input_cog": {
                 "href": output_cog,
                 "type": "image/tiff",
-                "title": "NDVI Output",
-                "description": "Output NDVI image",
+                "title": "NDWI Output",
+                "description": "Output NDWI image",
             }
         },
         "links": [
