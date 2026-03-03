@@ -54,10 +54,10 @@ The NDVI tool then:
 While the primary usage is via ADES and stage-in, you can also run the tool locally by mimicking the staged structure:
 
 ```bash
-python run.py --stac_item_dir /path/to/staged_item_dir --bbox "-122.5,37.5,-122.0,38.0"
+python run.py --stac_item_dir /path/to/stac_item --bbox "-122.5,37.5,-122.0,38.0"
 ```
 
-Where `/path/to/staged_item_dir` contains:
+Where `/path/to/stac_item` contains:
 
 - `catalog.json`
 - A STAC Item JSON file with an `assets` entry that points (via a relative `href`) to the input COG.
