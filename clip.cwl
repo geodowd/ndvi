@@ -7,8 +7,8 @@ schemas:
 
 $graph:
   - class: Workflow
-    id: ndvi-workflow
-    label: NDVI Calculation workflow
+    id: clip-workflow
+    label: Raster clipping workflow
     requirements:
       - class: ResourceRequirement
         coresMax: 2
@@ -18,8 +18,8 @@ $graph:
         label: Directory containing staged STAC Item (from stage-in)
         type: Directory
       bbox:
-        label: Bounding box
-        type: string?
+        label: Bounding box (required AOI)
+        type: string
     outputs:
       - id: results
         type: Directory
@@ -42,7 +42,7 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:0.2.6
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:clip_0.2.7
     baseCommand: ["python3", "/app/run.py"]
     inputs:
       stac_item_dir:
@@ -53,7 +53,7 @@ $graph:
           valueFrom: $(self.path)
           position: 1
       bbox:
-        type: string?
+        type: string
         inputBinding:
           prefix: --bbox=
           separate: false

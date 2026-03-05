@@ -352,7 +352,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ndvi"
+name = "clip"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

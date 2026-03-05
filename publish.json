@@ -1,0 +1,7 @@
+{
+    "workflows": {
+        "ndwi-workflow": {
+            "access": "public"
+        }
+    }
+}

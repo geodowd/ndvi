@@ -1,10 +1,10 @@
-# NDVI Processing Pipeline
+# Raster Clipping Pipeline
 
-A Python-based pipeline for calculating Normalized Difference Vegetation Index (NDVI) from Cloud-Optimized GeoTIFF (COG) files with support for bounding box (bbox) processing.
+A Python-based pipeline for clipping Cloud-Optimized GeoTIFF (COG) files to an Area of Interest (AOI) defined by a bounding box (bbox). When no bbox is provided, the full image is copied.
 
 ## Features
 
-- **NDVI Calculation**: Compute NDVI from COG files using specified red and NIR bands
+- **Raster Clipping**: Clip COG files to an AOI while preserving all original bands
 - **Bbox Processing**: Process only specific geographic regions without downloading entire files
 - **Multiple Input Formats**: Support for both local files and HTTP/HTTPS URLs
 - **STAC Metadata**: Generate STAC (SpatioTemporal Asset Catalog) metadata for outputs
@@ -40,14 +40,14 @@ In the ADES environment, you do not call `run.py` directly. Instead:
 
 - You submit a job to the Workflow Runner with a **single STAC Item reference** (HTTP/HTTPS URL, local path, or S3 URI).
 - The ADES **stage-in** component fetches the STAC Item and its assets and writes a local STAC Catalog on disk.
-- The `ndvi.cwl` workflow receives a `Directory` input (from stage-in) and passes it to `run.py` as `--stac_item_dir`.
+- The `clip.cwl` workflow receives a `Directory` input (from stage-in) and passes it to `run.py` as `--stac_item_dir`.
 
-The NDVI tool then:
+The tool then:
 
 - Locates the staged STAC Item JSON within `--stac_item_dir`.
 - Selects an appropriate asset from the item (for example, a `data` or `cog` asset).
 - Resolves the asset `href` to a local COG path.
-- Runs NDVI processing on that local file, optionally constrained by a `--bbox` parameter.
+- Clips that local file to the optional `--bbox` AOI or copies the full image when no bbox is provided.
 
 ### Local CLI usage (advanced)
 
@@ -80,13 +80,13 @@ The `--bbox` parameter accepts coordinates in the following format:
 
 ### Files Generated
 
-- **NDVI GeoTIFF**: `{input_basename}_ndvi.tif` (full image) or `{input_basename}_ndvi_{xmin}_{ymin}_{xmax}_{ymax}.tif` (bbox)
+- **Clipped Raster GeoTIFF**: `{input_basename}_clip_{xmin}_{ymin}_{xmax}_{ymax}.tif` (bbox), containing all original bands clipped to the AOI
 - **STAC Catalog**: `catalog.json`
 - **STAC Item**: `{item_id}.json`
 
 ### Output Directory
 
-All outputs are saved to the `output_ndvi/` directory.
+All outputs are saved to the `output_clip/` directory.
 
 ## STAC Metadata
 
@@ -106,14 +106,7 @@ The pipeline includes comprehensive error handling:
 
 ## Configuration
 
-### Band Selection
-
-Default bands used for NDVI calculation:
-
-- **Red Band**: 4
-- **NIR Band**: 8
-
-To modify these defaults, edit the `ndvi_calculation` function in `run.py`.
+The clipping pipeline operates on all bands present in the input COG. No band selection or per-pixel calculation is performed.
 
 ### Coordinate System
 
@@ -135,10 +128,10 @@ Build and run using Docker:
 
 ```bash
 # Build image
-docker build -t ndvi-pipeline .
+docker build -t clip-pipeline .
 
 # Run with bbox processing
-docker run -v $(pwd):/workspace ndvi-pipeline python run.py --input_cog input.tif --bbox "-122.5,37.5,-122.0,38.0"
+docker run -v $(pwd):/workspace clip-pipeline python run.py --stac_item_dir /path/to/stac_item --bbox "-122.5,37.5,-122.0,38.0"
 ```
 
 ## Troubleshooting

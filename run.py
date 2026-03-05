@@ -4,7 +4,7 @@ import logging
 import sys
 from pathlib import Path
 
-from ndvi_core import create_stac_catalog, log_memory_usage, monitor_memory_usage, ndvi_calculation_chunked
+from clip_core import create_stac_catalog, log_memory_usage, monitor_memory_usage, clip_raster_chunked
 from stac_io import resolve_input_cog_from_stagein
 
 # Configure logging to flush immediately
@@ -22,7 +22,7 @@ def parse_args():
     """
     Parse command line arguments.
     """
-    parser = argparse.ArgumentParser(description="Calculate NDVI from a COG file.")
+    parser = argparse.ArgumentParser(description="Clip a COG raster to a required bounding box (AOI).")
     parser.add_argument(
         "--stac_item_dir",
         type=str,
@@ -32,7 +32,8 @@ def parse_args():
     parser.add_argument(
         "--bbox",
         type=str,
-        help="Bounding box in format 'xmin,ymin,xmax,ymax' or 'xmin ymin xmax ymax' (longitude latitude coordinates)",
+        required=True,
+        help="Required bounding box in format 'xmin,ymin,xmax,ymax' or 'xmin ymin xmax ymax' (longitude latitude coordinates)",
     )
     parser.add_argument(
         "--chunk_width",
@@ -71,18 +72,18 @@ def parse_bbox(bbox_str):
         bbox_str: String in format 'xmin,ymin,xmax,ymax' or 'xmin ymin xmax ymax'
 
     Returns:
-        tuple: (xmin, ymin, xmax, ymax) as floats, or None if no bbox / null-like
+        tuple: (xmin, ymin, xmax, ymax) as floats.
 
     Raises:
-        ValueError: If bbox format is invalid or coordinates are invalid
+        ValueError: If bbox is missing, format is invalid, or coordinates are invalid.
     """
-    if not bbox_str:
-        return None
+    if bbox_str is None:
+        raise ValueError("Bbox (AOI) is required")
 
     bbox_str = bbox_str.strip()
-    # Treat null-like values as "no bbox" (e.g. from CWL optional input when not provided)
-    if bbox_str.lower() in ("null", "none") or bbox_str == "[]":
-        return None
+    # Treat empty or null-like values as invalid/missing bbox
+    if not bbox_str or bbox_str.lower() in ("null", "none") or bbox_str == "[]":
+        raise ValueError("Bbox (AOI) is required")
 
     # Try comma-separated format first
     if "," in bbox_str:
@@ -122,16 +123,16 @@ def parse_bbox(bbox_str):
 
 def get_image_bounds(input_cog):
     """
-    Deprecated shim; use ndvi_core.get_image_bounds instead.
+    Deprecated shim; use clip_core.get_image_bounds instead.
     """
-    from ndvi_core import get_image_bounds as _core_get_image_bounds
+    from clip_core import get_image_bounds as _core_get_image_bounds
 
     return _core_get_image_bounds(input_cog)
 
 
 if __name__ == "__main__":
-    logger.info("Starting NDVI processing pipeline...")
-    print("Starting NDVI processing pipeline....", flush=True)
+    logger.info("Starting raster clipping pipeline...")
+    print("Starting raster clipping pipeline....", flush=True)
 
     # Log initial memory state
     log_memory_usage("at pipeline start")
@@ -156,46 +157,40 @@ if __name__ == "__main__":
         logger.info(f"Resolved input COG from staged STAC to: {input_cog_local}")
         print(f"Resolved input COG from staged STAC to: {input_cog_local}", flush=True)
 
-        # Parse bbox if provided
-        bbox = None
-        if args.bbox:
+        # Parse and validate required bbox
+        try:
+            bbox = parse_bbox(args.bbox)
+            print(f"Processing bbox: {bbox}", flush=True)
+            logger.info(f"Processing bbox: {bbox}")
+
+            # Validate bbox against image bounds
             try:
-                bbox = parse_bbox(args.bbox)
-                if bbox is not None:
-                    print(f"Processing bbox: {bbox}", flush=True)
-                    logger.info(f"Processing bbox: {bbox}")
+                image_bounds = get_image_bounds(input_cog_local)
+                logger.info(f"Image bounds: {image_bounds}")
 
-                # Validate bbox against image bounds
-                try:
-                    image_bounds = get_image_bounds(input_cog_local)
-                    logger.info(f"Image bounds: {image_bounds}")
+                # Check if bbox overlaps with image bounds
+                xmin, ymin, xmax, ymax = bbox
+                img_xmin, img_ymin, img_xmax, img_ymax = image_bounds
 
-                    # Check if bbox overlaps with image bounds
-                    xmin, ymin, xmax, ymax = bbox
-                    img_xmin, img_ymin, img_xmax, img_ymax = image_bounds
+                if xmax < img_xmin or xmin > img_xmax or ymax < img_ymin or ymin > img_ymax:
+                    logger.warning("Bbox is outside image boundaries - this may result in an empty output")
 
-                    if xmax < img_xmin or xmin > img_xmax or ymax < img_ymin or ymin > img_ymax:
-                        logger.warning("Bbox is outside image boundaries - this may result in an empty output")
+            except Exception as e:
+                logger.warning(f"Could not validate bbox against image bounds: {e}")
 
-                except Exception as e:
-                    logger.warning(f"Could not validate bbox against image bounds: {e}")
-
-            except ValueError as e:
-                logger.error(f"Invalid bbox: {e}")
-                sys.exit(1)
+        except ValueError as e:
+            logger.error(f"Invalid bbox: {e}")
+            sys.exit(1)
 
         # Create dedicated output directory
-        output_dir = Path("output_ndvi")
+        output_dir = Path("output_clip")
         output_dir.mkdir(exist_ok=True)
 
         input_basename = Path(input_cog_local).stem
 
-        # Generate output filename based on whether bbox is provided
-        if bbox:
-            xmin, ymin, xmax, ymax = bbox
-            output_cog = output_dir / f"{input_basename}_ndvi_{xmin}_{ymin}_{xmax}_{ymax}.tif"
-        else:
-            output_cog = output_dir / f"{input_basename}_ndvi.tif"
+        # Generate output filename (AOI is required)
+        xmin, ymin, xmax, ymax = bbox
+        output_cog = output_dir / f"{input_basename}_clip_{xmin}_{ymin}_{xmax}_{ymax}.tif"
 
         # Determine chunk size
         chunk_size = None
@@ -205,17 +200,17 @@ if __name__ == "__main__":
         elif args.chunk_width or args.chunk_height:
             logger.warning("Both chunk_width and chunk_height must be specified, using auto-calculation")
 
-        # Process the NDVI calculation with chunked processing
-        log_memory_usage("before NDVI calculation")
-        ndvi_calculation_chunked(input_cog_local, output_cog, bbox=bbox, chunk_size=chunk_size)
+        # Perform raster clipping with chunked processing
+        log_memory_usage("before clipping")
+        clip_raster_chunked(input_cog_local, output_cog, bbox=bbox, chunk_size=chunk_size)
 
         # Create STAC catalog
         log_memory_usage("before STAC creation")
         create_stac_catalog(str(output_cog), bbox)
         log_memory_usage("after STAC creation")
 
-        logger.info("NDVI processing pipeline completed successfully")
-        print("NDVI processing pipeline completed successfully", flush=True)
+        logger.info("Raster clipping pipeline completed successfully")
+        print("Raster clipping pipeline completed successfully", flush=True)
 
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
@@ -224,7 +219,7 @@ if __name__ == "__main__":
         logger.error(f"Validation error: {e}")
         sys.exit(1)
     except Exception as e:
-        logger.error(f"NDVI processing pipeline failed: {e}")
+        logger.error(f"Raster clipping pipeline failed: {e}")
         import traceback
 
         traceback.print_exc(file=sys.stderr)

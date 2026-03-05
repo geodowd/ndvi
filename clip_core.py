@@ -56,15 +56,19 @@ def calculate_optimal_chunk_size(
     available_memory_mb: float,
     image_width: int,
     image_height: int,
+    band_count: int,
     dtype_size: int = 4,
 ):
     """
     Calculate optimal chunk size based on available memory.
+
+    The estimate is based on the number of bands and the data type size for
+    full multi-band clipping of the original raster.
     """
     usable_memory = available_memory_mb * 0.5
 
-    # 2 input bands + 1 output band
-    memory_per_pixel = 3 * dtype_size
+    # approximate bytes needed per pixel for all bands
+    memory_per_pixel = max(1, band_count) * dtype_size
     max_pixels = (usable_memory * 1024 * 1024) / memory_per_pixel
 
     base_chunk_size = 1024
@@ -87,13 +91,6 @@ def calculate_optimal_chunk_size(
 
     logger.info(f"Calculated chunk size: {chunk_width}x{chunk_height} pixels")
     return chunk_width, chunk_height
-
-
-def process_chunk(red_chunk, nir_chunk):
-    """Process a single chunk to calculate NDVI."""
-    denominator = nir_chunk + red_chunk
-    ndvi = np.where(denominator != 0, (nir_chunk - red_chunk) / denominator, 0)
-    return np.clip(ndvi, -1, 1).astype("float32")
 
 
 def debug_coordinate_mapping(
@@ -133,80 +130,87 @@ def validate_processing_window(window, image_width: int, image_height: int) -> b
     return True
 
 
-def ndvi_calculation_chunked(
+def clip_raster_chunked(
     input_cog: str,
-    output_ndvi: str,
-    red_band: int = 4,
-    nir_band: int = 8,
+    output_cog: str,
     bbox=None,
     chunk_size=None,
 ):
     """
-    Calculate NDVI from a COG file using chunked processing for memory efficiency.
+    Clip a COG raster to a required AOI/bounding box using chunked processing
+    for memory efficiency.
     """
-    print(f"Starting chunked NDVI calculation for {input_cog}")
-    logger.info(f"Starting chunked NDVI calculation for {input_cog}")
+    if bbox is None:
+        raise ValueError("bbox (AOI) is required for clipping.")
+
+    print(f"Starting chunked clipping for {input_cog}")
+    logger.info(f"Starting chunked clipping for {input_cog}")
     log_memory_usage("at start")
 
-    if bbox:
-        print(f"Processing bbox: {bbox}")
-        logger.info(f"Processing bbox: {bbox}")
+    print(f"Processing bbox: {bbox}")
+    logger.info(f"Processing bbox: {bbox}")
 
     with rasterio.open(input_cog) as src:
-        if red_band > src.count or nir_band > src.count:
-            raise ValueError(f"Band {red_band} or {nir_band} does not exist. " f"File has {src.count} bands.")
+        xmin, ymin, xmax, ymax = bbox
 
-        if bbox:
-            xmin, ymin, xmax, ymax = bbox
-
-            if src.crs != "EPSG:4326":
-                try:
-                    bbox_transformed = transform_bounds("EPSG:4326", src.crs, xmin, ymin, xmax, ymax)
-                    print(f"Bbox transformed from WGS84 to {src.crs}: {bbox_transformed}")
-                    logger.info(f"Bbox transformed from WGS84 to {src.crs}: {bbox_transformed}")
-                    xmin, ymin, xmax, ymax = bbox_transformed
-                except Exception as e:
-                    raise ValueError(f"Could not transform bbox coordinates: {e}")
-
+        if src.crs != "EPSG:4326":
             try:
-                window = rasterio.windows.from_bounds(xmin, ymin, xmax, ymax, src.transform)
-                image_window = rasterio.windows.Window(0, 0, src.width, src.height)
-                window = window.intersection(image_window)
-
-                if window.height == 0 or window.width == 0:
-                    image_bounds = src.bounds
-                    if (
-                        xmax < image_bounds.left
-                        or xmin > image_bounds.right
-                        or ymax < image_bounds.bottom
-                        or ymin > image_bounds.top
-                    ):
-                        raise ValueError(
-                            f"Bbox is completely outside image boundaries. "
-                            f"Bbox: ({xmin}, {ymin}, {xmax}, {ymax}), "
-                            f"Image bounds: {image_bounds}"
-                        )
-                    else:
-                        raise ValueError("Bbox results in empty intersection with image")
-
-                window = rasterio.windows.Window(
-                    int(max(0, window.col_off)),
-                    int(max(0, window.row_off)),
-                    int(min(window.width, src.width - window.col_off)),
-                    int(min(window.height, src.height - window.row_off)),
-                )
-
-                logger.info(f"Processing window: {window}")
-                process_window = window
+                bbox_transformed = transform_bounds("EPSG:4326", src.crs, xmin, ymin, xmax, ymax)
+                print(f"Bbox transformed from WGS84 to {src.crs}: {bbox_transformed}")
+                logger.info(f"Bbox transformed from WGS84 to {src.crs}: {bbox_transformed}")
+                xmin, ymin, xmax, ymax = bbox_transformed
             except Exception as e:
-                raise ValueError(f"Error processing bbox: {e}")
-        else:
-            process_window = rasterio.windows.Window(0, 0, src.width, src.height)
+                raise ValueError(f"Could not transform bbox coordinates: {e}")
+
+        try:
+            window = rasterio.windows.from_bounds(xmin, ymin, xmax, ymax, src.transform)
+            image_window = rasterio.windows.Window(0, 0, src.width, src.height)
+            window = window.intersection(image_window)
+
+            if window.height == 0 or window.width == 0:
+                image_bounds = src.bounds
+                if (
+                    xmax < image_bounds.left
+                    or xmin > image_bounds.right
+                    or ymax < image_bounds.bottom
+                    or ymin > image_bounds.top
+                ):
+                    raise ValueError(
+                        f"Bbox is completely outside image boundaries. "
+                        f"Bbox: ({xmin}, {ymin}, {xmax}, {ymax}), "
+                        f"Image bounds: {image_bounds}"
+                    )
+                else:
+                    raise ValueError("Bbox results in empty intersection with image")
+
+            window = rasterio.windows.Window(
+                int(max(0, window.col_off)),
+                int(max(0, window.row_off)),
+                int(min(window.width, src.width - window.col_off)),
+                int(min(window.height, src.height - window.row_off)),
+            )
+
+            logger.info(f"Processing window: {window}")
+            process_window = window
+        except Exception as e:
+            raise ValueError(f"Error processing bbox: {e}")
+
+        band_count = src.count
+        try:
+            dtype_size = np.dtype(src.dtypes[0]).itemsize
+        except Exception:
+            dtype_size = 4
 
         if chunk_size is None:
             try:
                 available_memory = psutil.virtual_memory().available / 1024 / 1024
-                chunk_size = calculate_optimal_chunk_size(available_memory, process_window.width, process_window.height)
+                chunk_size = calculate_optimal_chunk_size(
+                    available_memory,
+                    process_window.width,
+                    process_window.height,
+                    band_count=band_count,
+                    dtype_size=dtype_size,
+                )
             except Exception as e:
                 logger.warning(f"Could not determine optimal chunk size, using default: {e}")
                 chunk_size = (1024, 1024)
@@ -232,15 +236,13 @@ def ndvi_calculation_chunked(
                 "height": process_window.height,
                 "width": process_window.width,
                 "transform": rasterio.windows.transform(process_window, src.transform),
-                "dtype": "float32",
-                "count": 1,
             }
         )
 
-        output_path = Path(output_ndvi)
+        output_path = Path(output_cog)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with rasterio.open(output_ndvi, "w", **profile) as dst:
+        with rasterio.open(output_cog, "w", **profile) as dst:
             chunks_x = int(np.ceil(process_window.width / chunk_width))
             chunks_y = int(np.ceil(process_window.height / chunk_height))
 
@@ -311,13 +313,10 @@ def ndvi_calculation_chunked(
                         continue
 
                     try:
-                        red_chunk = src.read(red_band, window=input_chunk_window).astype("float32")
-                        nir_chunk = src.read(nir_band, window=input_chunk_window).astype("float32")
+                        data_chunk = src.read(window=input_chunk_window)
+                        dst.write(data_chunk, window=output_chunk_window)
 
-                        ndvi_chunk = process_chunk(red_chunk, nir_chunk)
-                        dst.write(ndvi_chunk, 1, window=output_chunk_window)
-
-                        del red_chunk, nir_chunk, ndvi_chunk
+                        del data_chunk
                         gc.collect()
                     except Exception as e:  # pragma: no cover - defensive logging
                         logger.error(f"Error processing chunk at ({chunk_x}, {chunk_y}): {e}")
@@ -331,19 +330,8 @@ def ndvi_calculation_chunked(
                         logger.info(f"Processed {chunk_num}/{chunks_x * chunks_y} chunks")
                         log_memory_usage(f"after chunk {chunk_num}")
 
-        logger.info("NDVI computation completed successfully")
+        logger.info("Clipping completed successfully")
         log_memory_usage("after completion")
-
-
-def ndvi_calculation(
-    input_cog: str,
-    output_ndvi: str,
-    red_band: int = 4,
-    nir_band: int = 8,
-    bbox=None,
-):
-    """Legacy wrapper for the chunked NDVI calculation."""
-    return ndvi_calculation_chunked(input_cog, output_ndvi, red_band, nir_band, bbox)
 
 
 def generate_catalog(item_id: str) -> None:
@@ -376,8 +364,8 @@ def generate_item(item_id: str, date: str, output_cog: str, bbox=None) -> None:
             "input_cog": {
                 "href": output_cog,
                 "type": "image/tiff",
-                "title": "NDVI Output",
-                "description": "Output NDVI image",
+                "title": "Clipped raster",
+                "description": "Raster clipped to AOI (if provided), otherwise full-scene raster",
             }
         },
         "links": [
