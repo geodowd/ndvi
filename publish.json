@@ -1,6 +1,6 @@
 {
     "workflows": {
-        "ndwi-workflow": {
+        "clip-workflow": {
             "access": "public"
         }
     }
