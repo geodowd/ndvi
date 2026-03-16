@@ -42,7 +42,7 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:0.2.6
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:0.3.0
     baseCommand: ["python3", "/app/run.py"]
     inputs:
       stac_item_dir:
