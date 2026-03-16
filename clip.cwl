@@ -7,8 +7,8 @@ schemas:
 
 $graph:
   - class: Workflow
-    id: ndvi-workflow
-    label: NDVI Calculation workflow
+    id: clip-workflow
+    label: Clip COG workflow
     requirements:
       - class: ResourceRequirement
         coresMax: 2
@@ -24,17 +24,17 @@ $graph:
       - id: results
         type: Directory
         outputSource:
-          - test-access/results
+          - clip-step/results
     steps:
-      test-access:
-        run: "#test-access"
+      clip-step:
+        run: "#clip-tool"
         in:
           stac_item_dir: stac_item
           bbox: bbox
         out: [results]
 
   - class: CommandLineTool
-    id: test-access
+    id: clip-tool
     requirements:
       - class: ResourceRequirement
         coresMax: 1
@@ -43,7 +43,7 @@ $graph:
     hints:
       DockerRequirement:
         dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:1.0.0
-    baseCommand: ["python3", "/app/run_ndvi.py"]
+    baseCommand: ["python3", "/app/run_clip.py"]
     inputs:
       stac_item_dir:
         type: Directory

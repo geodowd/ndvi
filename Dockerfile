@@ -38,6 +38,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY ./*.py /app
 
-CMD ["python3", "-u", "run.py"]
+# Default command kept for backwards compatibility; CWL overrides via baseCommand.
+CMD ["python3", "-u", "run_ndvi.py"]
 
 

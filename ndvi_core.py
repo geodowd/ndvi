@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Callable, Dict, Optional, Sequence, Tuple
 
 import numpy as np
 import psutil
@@ -57,13 +58,13 @@ def calculate_optimal_chunk_size(
     image_width: int,
     image_height: int,
     dtype_size: int = 4,
-):
+) -> Tuple[int, int]:
     """
     Calculate optimal chunk size based on available memory.
     """
     usable_memory = available_memory_mb * 0.5
 
-    # 2 input bands + 1 output band
+    # 2 input bands + 1 output band by default
     memory_per_pixel = 3 * dtype_size
     max_pixels = (usable_memory * 1024 * 1024) / memory_per_pixel
 
@@ -89,22 +90,42 @@ def calculate_optimal_chunk_size(
     return chunk_width, chunk_height
 
 
-def process_chunk(red_chunk, nir_chunk):
-    """Process a single chunk to calculate NDVI."""
+def compute_ndvi_chunk(red_chunk, nir_chunk):
+    """Compute NDVI for a chunk."""
     denominator = nir_chunk + red_chunk
     ndvi = np.where(denominator != 0, (nir_chunk - red_chunk) / denominator, 0)
     return np.clip(ndvi, -1, 1).astype("float32")
 
 
+def compute_ndwi_chunk(green_chunk, nir_chunk):
+    """Compute NDWI for a chunk."""
+    denominator = green_chunk + nir_chunk
+    ndwi = np.where(denominator != 0, (green_chunk - nir_chunk) / denominator, 0)
+    return np.clip(ndwi, -1, 1).astype("float32")
+
+
+def compute_clip_chunk(*bands):
+    """
+    Passthrough for clip operation.
+
+    Supports:
+    - single-band input: returns the single array unchanged
+    - multi-band input: stacks bands into a (bands, height, width) array
+    """
+    if len(bands) == 1:
+        return bands[0]
+    return np.stack(bands, axis=0)
+
+
 def debug_coordinate_mapping(
     process_window,
-    chunk_x,
-    chunk_y,
-    chunk_width,
-    chunk_height,
-    src_width,
-    src_height,
-):
+    chunk_x: int,
+    chunk_y: int,
+    chunk_width: int,
+    chunk_height: int,
+    src_width: int,
+    src_height: int,
+) -> None:
     """Debug function to show coordinate mapping between input and output."""
     input_start_x = process_window.col_off + chunk_x * chunk_width
     input_start_y = process_window.row_off + chunk_y * chunk_height
@@ -133,19 +154,76 @@ def validate_processing_window(window, image_width: int, image_height: int) -> b
     return True
 
 
-def ndvi_calculation_chunked(
+def _calculate_process_window(src, bbox) -> rasterio.windows.Window:
+    """
+    Convert an EPSG:4326 bbox into a rasterio window in the source CRS,
+    preserving the current NDVI error semantics.
+    """
+    if not bbox:
+        return rasterio.windows.Window(0, 0, src.width, src.height)
+
+    xmin, ymin, xmax, ymax = bbox
+
+    if src.crs != "EPSG:4326":
+        try:
+            bbox_transformed = transform_bounds("EPSG:4326", src.crs, xmin, ymin, xmax, ymax)
+            print(f"Bbox transformed from WGS84 to {src.crs}: {bbox_transformed}")
+            logger.info(f"Bbox transformed from WGS84 to {src.crs}: {bbox_transformed}")
+            xmin, ymin, xmax, ymax = bbox_transformed
+        except Exception as e:
+            raise ValueError(f"Could not transform bbox coordinates: {e}")
+
+    try:
+        window = rasterio.windows.from_bounds(xmin, ymin, xmax, ymax, src.transform)
+        image_window = rasterio.windows.Window(0, 0, src.width, src.height)
+        window = window.intersection(image_window)
+
+        if window.height == 0 or window.width == 0:
+            image_bounds = src.bounds
+            if (
+                xmax < image_bounds.left
+                or xmin > image_bounds.right
+                or ymax < image_bounds.bottom
+                or ymin > image_bounds.top
+            ):
+                raise ValueError(
+                    "Bbox is completely outside image boundaries. "
+                    f"Bbox: ({xmin}, {ymin}, {xmax}, {ymax}), "
+                    f"Image bounds: {image_bounds}"
+                )
+            raise ValueError("Bbox results in empty intersection with image")
+
+        window = rasterio.windows.Window(
+            int(max(0, window.col_off)),
+            int(max(0, window.row_off)),
+            int(min(window.width, src.width - window.col_off)),
+            int(min(window.height, src.height - window.row_off)),
+        )
+
+        logger.info(f"Processing window: {window}")
+        return window
+    except Exception as e:
+        raise ValueError(f"Error processing bbox: {e}")
+
+
+def process_single_band_product(
     input_cog: str,
-    output_ndvi: str,
-    red_band: int = 4,
-    nir_band: int = 8,
+    output_cog: str,
     bbox=None,
-    chunk_size=None,
-):
+    chunk_size: Optional[Tuple[int, int]] = None,
+    input_bands: Optional[Sequence[int]] = (4, 8),
+    compute_chunk_fn: Optional[Callable[..., np.ndarray]] = None,
+    output_band_count: Optional[int] = 1,
+) -> None:
     """
-    Calculate NDVI from a COG file using chunked processing for memory efficiency.
+    Generic driver to compute a single-band (or few-band) raster product
+    from one or more input bands.
     """
-    print(f"Starting chunked NDVI calculation for {input_cog}")
-    logger.info(f"Starting chunked NDVI calculation for {input_cog}")
+    if compute_chunk_fn is None:
+        raise ValueError("compute_chunk_fn must be provided")
+
+    print(f"Starting chunked processing for {input_cog}")
+    logger.info(f"Starting chunked processing for {input_cog}")
     log_memory_usage("at start")
 
     if bbox:
@@ -153,55 +231,15 @@ def ndvi_calculation_chunked(
         logger.info(f"Processing bbox: {bbox}")
 
     with rasterio.open(input_cog) as src:
-        if red_band > src.count or nir_band > src.count:
-            raise ValueError(f"Band {red_band} or {nir_band} does not exist. " f"File has {src.count} bands.")
+        # If no explicit bands are provided, use all bands from the source.
+        if input_bands is None:
+            input_bands = tuple(range(1, src.count + 1))
 
-        if bbox:
-            xmin, ymin, xmax, ymax = bbox
+        for band_index in input_bands:
+            if band_index > src.count:
+                raise ValueError(f"Band {band_index} does not exist. File has {src.count} bands.")
 
-            if src.crs != "EPSG:4326":
-                try:
-                    bbox_transformed = transform_bounds("EPSG:4326", src.crs, xmin, ymin, xmax, ymax)
-                    print(f"Bbox transformed from WGS84 to {src.crs}: {bbox_transformed}")
-                    logger.info(f"Bbox transformed from WGS84 to {src.crs}: {bbox_transformed}")
-                    xmin, ymin, xmax, ymax = bbox_transformed
-                except Exception as e:
-                    raise ValueError(f"Could not transform bbox coordinates: {e}")
-
-            try:
-                window = rasterio.windows.from_bounds(xmin, ymin, xmax, ymax, src.transform)
-                image_window = rasterio.windows.Window(0, 0, src.width, src.height)
-                window = window.intersection(image_window)
-
-                if window.height == 0 or window.width == 0:
-                    image_bounds = src.bounds
-                    if (
-                        xmax < image_bounds.left
-                        or xmin > image_bounds.right
-                        or ymax < image_bounds.bottom
-                        or ymin > image_bounds.top
-                    ):
-                        raise ValueError(
-                            f"Bbox is completely outside image boundaries. "
-                            f"Bbox: ({xmin}, {ymin}, {xmax}, {ymax}), "
-                            f"Image bounds: {image_bounds}"
-                        )
-                    else:
-                        raise ValueError("Bbox results in empty intersection with image")
-
-                window = rasterio.windows.Window(
-                    int(max(0, window.col_off)),
-                    int(max(0, window.row_off)),
-                    int(min(window.width, src.width - window.col_off)),
-                    int(min(window.height, src.height - window.row_off)),
-                )
-
-                logger.info(f"Processing window: {window}")
-                process_window = window
-            except Exception as e:
-                raise ValueError(f"Error processing bbox: {e}")
-        else:
-            process_window = rasterio.windows.Window(0, 0, src.width, src.height)
+        process_window = _calculate_process_window(src, bbox)
 
         if chunk_size is None:
             try:
@@ -224,7 +262,11 @@ def ndvi_calculation_chunked(
         logger.info(f"Processing window: {process_window.width}x{process_window.height}")
 
         if not validate_processing_window(process_window, src.width, src.height):
-            raise ValueError(f"Processing window {process_window} is outside image bounds " f"{src.width}x{src.height}")
+            raise ValueError(f"Processing window {process_window} is outside image bounds {src.width}x{src.height}")
+
+        # Determine number of output bands if not explicitly provided.
+        if output_band_count is None:
+            output_band_count = len(input_bands)
 
         profile = src.profile.copy()
         profile.update(
@@ -233,14 +275,14 @@ def ndvi_calculation_chunked(
                 "width": process_window.width,
                 "transform": rasterio.windows.transform(process_window, src.transform),
                 "dtype": "float32",
-                "count": 1,
+                "count": output_band_count,
             }
         )
 
-        output_path = Path(output_ndvi)
+        output_path = Path(output_cog)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with rasterio.open(output_ndvi, "w", **profile) as dst:
+        with rasterio.open(output_cog, "w", **profile) as dst:
             chunks_x = int(np.ceil(process_window.width / chunk_width))
             chunks_y = int(np.ceil(process_window.height / chunk_height))
 
@@ -254,7 +296,7 @@ def ndvi_calculation_chunked(
             )
             logger.info(f"Input image dimensions: {src.width}x{src.height}")
             logger.info(f"Output image dimensions: {process_window.width}x{process_window.height}")
-            logger.info("Coordinate system: Input uses absolute coordinates, " "Output uses relative coordinates (0,0)")
+            logger.info("Coordinate system: Input uses absolute coordinates, Output uses relative coordinates (0,0)")
             log_memory_usage("before chunk processing")
 
             for chunk_y in range(chunks_y):
@@ -311,13 +353,29 @@ def ndvi_calculation_chunked(
                         continue
 
                     try:
-                        red_chunk = src.read(red_band, window=input_chunk_window).astype("float32")
-                        nir_chunk = src.read(nir_band, window=input_chunk_window).astype("float32")
+                        band_arrays = [
+                            src.read(band_index, window=input_chunk_window).astype("float32")
+                            for band_index in input_bands
+                        ]
 
-                        ndvi_chunk = process_chunk(red_chunk, nir_chunk)
-                        dst.write(ndvi_chunk, 1, window=output_chunk_window)
+                        if len(band_arrays) == 1:
+                            output_chunk = compute_chunk_fn(band_arrays[0])
+                        elif len(band_arrays) == 2:
+                            output_chunk = compute_chunk_fn(band_arrays[0], band_arrays[1])
+                        else:
+                            output_chunk = compute_chunk_fn(*band_arrays)
 
-                        del red_chunk, nir_chunk, ndvi_chunk
+                        if output_band_count == 1:
+                            dst.write(output_chunk, 1, window=output_chunk_window)
+                        else:
+                            if output_chunk.ndim == 2:
+                                for band_index in range(1, output_band_count + 1):
+                                    dst.write(output_chunk, band_index, window=output_chunk_window)
+                            else:
+                                for band_index in range(1, output_band_count + 1):
+                                    dst.write(output_chunk[band_index - 1], band_index, window=output_chunk_window)
+
+                        del band_arrays, output_chunk
                         gc.collect()
                     except Exception as e:  # pragma: no cover - defensive logging
                         logger.error(f"Error processing chunk at ({chunk_x}, {chunk_y}): {e}")
@@ -331,8 +389,30 @@ def ndvi_calculation_chunked(
                         logger.info(f"Processed {chunk_num}/{chunks_x * chunks_y} chunks")
                         log_memory_usage(f"after chunk {chunk_num}")
 
-        logger.info("NDVI computation completed successfully")
+        logger.info("Processing completed successfully")
         log_memory_usage("after completion")
+
+
+def ndvi_calculation_chunked(
+    input_cog: str,
+    output_ndvi: str,
+    red_band: int = 4,
+    nir_band: int = 8,
+    bbox=None,
+    chunk_size: Optional[Tuple[int, int]] = None,
+):
+    """
+    Backwards-compatible NDVI wrapper around the generic processor.
+    """
+    return process_single_band_product(
+        input_cog=input_cog,
+        output_cog=output_ndvi,
+        bbox=bbox,
+        chunk_size=chunk_size,
+        input_bands=(red_band, nir_band),
+        compute_chunk_fn=compute_ndvi_chunk,
+        output_band_count=1,
+    )
 
 
 def ndvi_calculation(
@@ -361,7 +441,21 @@ def generate_catalog(item_id: str) -> None:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-def generate_item(item_id: str, date: str, output_cog: str, bbox=None) -> None:
+def generate_item(
+    item_id: str,
+    date: str,
+    output_cog: str,
+    bbox=None,
+    product_type: str = "ndvi",
+    extra_properties: Optional[Dict[str, object]] = None,
+) -> None:
+    properties: Dict[str, object] = {"created": date, "datetime": date, "updated": date}
+    properties["product_type"] = product_type
+    if product_type in {"ndvi", "ndwi"}:
+        properties.setdefault("index_name", product_type.upper())
+    if extra_properties:
+        properties.update(extra_properties)
+
     data = {
         "stac_version": "1.0.0",
         "id": item_id,
@@ -370,14 +464,14 @@ def generate_item(item_id: str, date: str, output_cog: str, bbox=None) -> None:
             "type": "Polygon",
             "coordinates": [[[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]],
         },
-        "properties": {"created": date, "datetime": date, "updated": date},
+        "properties": properties,
         "bbox": [-180, -90, 180, 90],
         "assets": {
             "input_cog": {
                 "href": output_cog,
                 "type": "image/tiff",
-                "title": "NDVI Output",
-                "description": "Output NDVI image",
+                "title": f"{product_type.upper()} Output" if product_type else "Raster Output",
+                "description": f"Output {product_type.upper()} image" if product_type else "Output raster image",
             }
         },
         "links": [
@@ -402,12 +496,24 @@ def generate_item(item_id: str, date: str, output_cog: str, bbox=None) -> None:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-def create_stac_catalog(output_cog, bbox=None) -> None:
+def create_product_stac_catalog(
+    output_cog: str,
+    bbox=None,
+    product_type: str = "ndvi",
+    extra_properties: Optional[Dict[str, object]] = None,
+) -> None:
     item_id = output_cog.split("/")[-1].split(".")[0]
     now = time.time_ns() / 1_000_000_000
     date_now = dt.datetime.fromtimestamp(now).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
     generate_catalog(item_id)
-    generate_item(item_id, date_now, output_cog, bbox)
+    generate_item(item_id, date_now, output_cog, bbox, product_type=product_type, extra_properties=extra_properties)
+
+
+def create_stac_catalog(output_cog, bbox=None) -> None:
+    """
+    Backwards-compatible STAC creator for NDVI.
+    """
+    create_product_stac_catalog(output_cog, bbox=bbox, product_type="ndvi")
 
 
 def get_image_bounds(input_cog: str):
@@ -415,3 +521,44 @@ def get_image_bounds(input_cog: str):
     with rasterio.open(input_cog) as src:
         bounds = src.bounds
         return bounds.left, bounds.bottom, bounds.right, bounds.top
+
+
+def run_ndvi(input_cog: str, output_cog: str, bbox=None, chunk_size: Optional[Tuple[int, int]] = None) -> None:
+    process_single_band_product(
+        input_cog=input_cog,
+        output_cog=output_cog,
+        bbox=bbox,
+        chunk_size=chunk_size,
+        input_bands=(4, 8),
+        compute_chunk_fn=compute_ndvi_chunk,
+        output_band_count=1,
+    )
+
+
+def run_ndwi(input_cog: str, output_cog: str, bbox=None, chunk_size: Optional[Tuple[int, int]] = None) -> None:
+    process_single_band_product(
+        input_cog=input_cog,
+        output_cog=output_cog,
+        bbox=bbox,
+        chunk_size=chunk_size,
+        input_bands=(3, 8),
+        compute_chunk_fn=compute_ndwi_chunk,
+        output_band_count=1,
+    )
+
+
+def run_clip(
+    input_cog: str,
+    output_cog: str,
+    bbox=None,
+    chunk_size: Optional[Tuple[int, int]] = None,
+) -> None:
+    process_single_band_product(
+        input_cog=input_cog,
+        output_cog=output_cog,
+        bbox=bbox,
+        chunk_size=chunk_size,
+        input_bands=None,
+        compute_chunk_fn=compute_clip_chunk,
+        output_band_count=None,
+    )
