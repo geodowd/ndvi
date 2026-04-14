@@ -393,6 +393,95 @@ def process_single_band_product(
         log_memory_usage("after completion")
 
 
+def process_two_source_product(
+    input_a: str,
+    input_b: str,
+    output_cog: str,
+    compute_chunk_fn: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    bbox=None,
+    chunk_size: Optional[Tuple[int, int]] = None,
+) -> None:
+    """
+    Process a two-band index product from two separate single-band rasters.
+    """
+    print(f"Starting chunked processing for {input_a} + {input_b}")
+    logger.info(f"Starting chunked processing for two-source inputs: {input_a}, {input_b}")
+    log_memory_usage("at start")
+
+    with rasterio.open(input_a) as src_a, rasterio.open(input_b) as src_b:
+        if src_a.width != src_b.width or src_a.height != src_b.height:
+            raise ValueError("Input rasters do not have matching dimensions")
+        if src_a.transform != src_b.transform:
+            raise ValueError("Input rasters do not have matching transforms")
+        if src_a.crs != src_b.crs:
+            raise ValueError("Input rasters do not have matching CRS")
+
+        process_window = _calculate_process_window(src_a, bbox)
+
+        if chunk_size is None:
+            try:
+                available_memory = psutil.virtual_memory().available / 1024 / 1024
+                chunk_size = calculate_optimal_chunk_size(available_memory, process_window.width, process_window.height)
+            except Exception as e:
+                logger.warning(f"Could not determine optimal chunk size, using default: {e}")
+                chunk_size = (1024, 1024)
+
+        chunk_width, chunk_height = chunk_size
+        chunk_width = min(chunk_width, process_window.width)
+        chunk_height = min(chunk_height, process_window.height)
+
+        profile = src_a.profile.copy()
+        profile.update(
+            {
+                "height": process_window.height,
+                "width": process_window.width,
+                "transform": rasterio.windows.transform(process_window, src_a.transform),
+                "dtype": "float32",
+                "count": 1,
+            }
+        )
+
+        output_path = Path(output_cog)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with rasterio.open(output_cog, "w", **profile) as dst:
+            chunks_x = int(np.ceil(process_window.width / chunk_width))
+            chunks_y = int(np.ceil(process_window.height / chunk_height))
+
+            for chunk_y in range(chunks_y):
+                for chunk_x in range(chunks_x):
+                    chunk_start_x = process_window.col_off + chunk_x * chunk_width
+                    chunk_start_y = process_window.row_off + chunk_y * chunk_height
+                    chunk_end_x = min(chunk_start_x + chunk_width, process_window.col_off + process_window.width)
+                    chunk_end_y = min(chunk_start_y + chunk_height, process_window.row_off + process_window.height)
+
+                    chunk_width_actual = chunk_end_x - chunk_start_x
+                    chunk_height_actual = chunk_end_y - chunk_start_y
+                    if chunk_width_actual <= 0 or chunk_height_actual <= 0:
+                        continue
+
+                    input_chunk_window = rasterio.windows.Window(
+                        chunk_start_x,
+                        chunk_start_y,
+                        chunk_width_actual,
+                        chunk_height_actual,
+                    )
+                    output_chunk_window = rasterio.windows.Window(
+                        chunk_x * chunk_width,
+                        chunk_y * chunk_height,
+                        chunk_width_actual,
+                        chunk_height_actual,
+                    )
+
+                    band_a = src_a.read(1, window=input_chunk_window).astype("float32")
+                    band_b = src_b.read(1, window=input_chunk_window).astype("float32")
+                    output_chunk = compute_chunk_fn(band_a, band_b)
+                    dst.write(output_chunk, 1, window=output_chunk_window)
+
+                    del band_a, band_b, output_chunk
+                    gc.collect()
+
+
 def ndvi_calculation_chunked(
     input_cog: str,
     output_ndvi: str,
@@ -524,26 +613,80 @@ def get_image_bounds(input_cog: str):
 
 
 def run_ndvi(input_cog: str, output_cog: str, bbox=None, chunk_size: Optional[Tuple[int, int]] = None) -> None:
+    run_ndvi_with_bands(input_cog, output_cog, input_bands=(4, 8), bbox=bbox, chunk_size=chunk_size)
+
+
+def run_ndvi_with_bands(
+    input_cog: str,
+    output_cog: str,
+    input_bands: Tuple[int, int],
+    bbox=None,
+    chunk_size: Optional[Tuple[int, int]] = None,
+) -> None:
     process_single_band_product(
         input_cog=input_cog,
         output_cog=output_cog,
         bbox=bbox,
         chunk_size=chunk_size,
-        input_bands=(4, 8),
+        input_bands=input_bands,
         compute_chunk_fn=compute_ndvi_chunk,
         output_band_count=1,
     )
 
 
 def run_ndwi(input_cog: str, output_cog: str, bbox=None, chunk_size: Optional[Tuple[int, int]] = None) -> None:
+    run_ndwi_with_bands(input_cog, output_cog, input_bands=(3, 8), bbox=bbox, chunk_size=chunk_size)
+
+
+def run_ndwi_with_bands(
+    input_cog: str,
+    output_cog: str,
+    input_bands: Tuple[int, int],
+    bbox=None,
+    chunk_size: Optional[Tuple[int, int]] = None,
+) -> None:
     process_single_band_product(
         input_cog=input_cog,
         output_cog=output_cog,
         bbox=bbox,
         chunk_size=chunk_size,
-        input_bands=(3, 8),
+        input_bands=input_bands,
         compute_chunk_fn=compute_ndwi_chunk,
         output_band_count=1,
+    )
+
+
+def run_ndvi_from_two_sources(
+    red_path: str,
+    nir_path: str,
+    output_cog: str,
+    bbox=None,
+    chunk_size: Optional[Tuple[int, int]] = None,
+) -> None:
+    process_two_source_product(
+        input_a=red_path,
+        input_b=nir_path,
+        output_cog=output_cog,
+        compute_chunk_fn=compute_ndvi_chunk,
+        bbox=bbox,
+        chunk_size=chunk_size,
+    )
+
+
+def run_ndwi_from_two_sources(
+    green_path: str,
+    nir_path: str,
+    output_cog: str,
+    bbox=None,
+    chunk_size: Optional[Tuple[int, int]] = None,
+) -> None:
+    process_two_source_product(
+        input_a=green_path,
+        input_b=nir_path,
+        output_cog=output_cog,
+        compute_chunk_fn=compute_ndwi_chunk,
+        bbox=bbox,
+        chunk_size=chunk_size,
     )
 
 

@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 
 from ndvi_core import get_image_bounds
 from run import parse_bbox  # reuse existing bbox parsing semantics
-from stac_io import resolve_input_cog_from_stagein
+from stac_io import ResolvedStacInput, resolve_stac_input_from_stagein
 
 logger = logging.getLogger(__name__)
 
@@ -69,18 +69,38 @@ def parse_args_common(include_band: bool = False):
     return parser.parse_args()
 
 
-def resolve_input_cog_and_bbox(stac_item_dir: Path, bbox_str: Optional[str]):
+def _required_common_names_for_product(product_type: str):
+    if product_type == "ndvi":
+        return ("red", "nir")
+    if product_type == "ndwi":
+        return ("green", "nir")
+    return ()
+
+
+def resolve_input_and_bbox(
+    stac_item_dir: Path,
+    bbox_str: Optional[str],
+    product_type: str,
+) -> Tuple[ResolvedStacInput, Optional[Tuple[float, float, float, float]]]:
     """
-    Resolve local input COG path from staged STAC directory and parse bbox.
+    Resolve local STAC input(s) from staged STAC directory and parse bbox.
     """
     if not stac_item_dir.exists() or not stac_item_dir.is_dir():
         logger.error(f"STAC item directory does not exist or is not a directory: {stac_item_dir}")
         raise SystemExit(1)
 
     logger.info(f"STAC item directory: {stac_item_dir}")
-    input_cog_local = resolve_input_cog_from_stagein(stac_item_dir)
-    logger.info(f"Resolved input COG from staged STAC to: {input_cog_local}")
-    print(f"Resolved input COG from staged STAC to: {input_cog_local}", flush=True)
+    required_common_names = _required_common_names_for_product(product_type)
+    resolved_input = resolve_stac_input_from_stagein(stac_item_dir, required_common_names=required_common_names)
+    logger.info(
+        f"Resolved STAC input mode={resolved_input.mode} "
+        f"primary_path={resolved_input.primary_path}"
+    )
+    print(
+        f"Resolved STAC input mode={resolved_input.mode} "
+        f"primary_path={resolved_input.primary_path}",
+        flush=True,
+    )
 
     bbox = None
     if bbox_str:
@@ -91,7 +111,7 @@ def resolve_input_cog_and_bbox(stac_item_dir: Path, bbox_str: Optional[str]):
                 logger.info(f"Processing bbox: {bbox}")
 
             try:
-                image_bounds = get_image_bounds(str(input_cog_local))
+                image_bounds = get_image_bounds(str(resolved_input.primary_path))
                 logger.info(f"Image bounds: {image_bounds}")
 
                 xmin, ymin, xmax, ymax = bbox
@@ -106,7 +126,17 @@ def resolve_input_cog_and_bbox(stac_item_dir: Path, bbox_str: Optional[str]):
             logger.error(f"Invalid bbox: {e}")
             raise SystemExit(1)
 
-    return input_cog_local, bbox
+    return resolved_input, bbox
+
+
+def resolve_input_cog_and_bbox(stac_item_dir: Path, bbox_str: Optional[str]):
+    """
+    Backwards-compatible resolver that expects a single-source input COG.
+    """
+    resolved_input, bbox = resolve_input_and_bbox(stac_item_dir, bbox_str, product_type="clip")
+    if resolved_input.single_path is None:
+        raise RuntimeError("Expected single-source STAC input for this workflow")
+    return resolved_input.single_path, bbox
 
 
 def build_output_filename(product_type: str, input_basename: str, bbox) -> str:

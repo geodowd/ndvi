@@ -1,7 +1,7 @@
 cwlVersion: v1.2
 $namespaces:
   s: https://schema.org/
-s:softwareVersion: 1.0.0
+s:softwareVersion: 1.5.0
 schemas:
   - http://schema.org/version/9.0/schemaorg-current-http.rdf
 
@@ -42,7 +42,7 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:1.0.0
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:1.5.0
     baseCommand: ["python3", "/app/run_ndwi.py"]
     inputs:
       stac_item_dir:
