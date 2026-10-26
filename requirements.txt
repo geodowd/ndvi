@@ -1,4 +1,0 @@
-numpy
-rasterio
-pystac>=1.14
-psutil

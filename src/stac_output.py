@@ -67,7 +67,10 @@ def _band_statistics(src) -> List[Optional[dict]]:
 
 
 def _footprint(src) -> Tuple[dict, List[float]]:
-    """Output raster extent as an EPSG:4326 polygon and bbox (densified, cut at the antimeridian)."""
+    """
+    Output raster extent as an EPSG:4326 polygon and bbox, densified so curved edges are followed.
+    rasterio >= 1.5 cuts geometries that cross the antimeridian.
+    """
     left, bottom, right, top = src.bounds
     n = _DENSIFY_POINTS
     xs = [left + (right - left) * i / (n - 1) for i in range(n)]
@@ -78,9 +81,7 @@ def _footprint(src) -> Tuple[dict, List[float]]:
         + [(x, top) for x in reversed(xs[:-1])]
         + [(left, y) for y in reversed(ys[:-1])]
     )
-    geometry = transform_geom(
-        src.crs, "EPSG:4326", {"type": "Polygon", "coordinates": [ring]}, antimeridian_cutting=True, precision=7
-    )
+    geometry = transform_geom(src.crs, "EPSG:4326", {"type": "Polygon", "coordinates": [ring]}, precision=7)
     bbox = transform_bounds(src.crs, "EPSG:4326", left, bottom, right, top, densify_pts=n)
     return geometry, [round(v, 7) for v in bbox]
 

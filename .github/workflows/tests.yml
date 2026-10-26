@@ -17,7 +17,10 @@ jobs:
         run: uv sync --frozen
 
       - name: Lint
-        run: uvx ruff check . && uvx ruff format --check .
+        run: uv run ruff check . && uv run ruff format --check .
+
+      - name: Validate CWL
+        run: for cwl in cwl/*.cwl; do uv run cwltool --validate "$cwl"; done
 
       - name: Test
         run: uv run pytest

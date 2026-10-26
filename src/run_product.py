@@ -109,7 +109,6 @@ if __name__ == "__main__":
     product = PRODUCTS[args.product]
 
     logger.info(f"Starting {product.title} processing pipeline...")
-    print(f"Starting {product.title} processing pipeline....", flush=True)
     log_memory_usage("at pipeline start")
 
     try:
@@ -126,7 +125,6 @@ if __name__ == "__main__":
         )
 
         logger.info(f"{product.title} processing pipeline completed successfully")
-        print(f"{product.title} processing pipeline completed successfully", flush=True)
 
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")

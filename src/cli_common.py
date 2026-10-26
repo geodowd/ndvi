@@ -54,11 +54,6 @@ def parse_args_common(product_ids: Sequence[str]):
         help="Custom chunk height in pixels for memory optimization (default: auto-calculated)",
     )
     parser.add_argument(
-        "--max_memory_mb",
-        type=int,
-        help="Maximum memory to use in MB (currently informational; default: auto-detected from system)",
-    )
-    parser.add_argument(
         "--monitor_memory",
         action="store_true",
         help="Enable continuous memory monitoring during processing",
@@ -88,17 +83,12 @@ def resolve_input_and_bbox(
     logger.info(f"STAC item directory: {stac_item_dir}")
     resolved_input = resolve_stac_input_from_stagein(stac_item_dir, required_common_names=required_common_names)
     logger.info(f"Resolved STAC input mode={resolved_input.mode} primary_path={resolved_input.primary_path}")
-    print(
-        f"Resolved STAC input mode={resolved_input.mode} primary_path={resolved_input.primary_path}",
-        flush=True,
-    )
 
     bbox = None
     if bbox_str:
         try:
             bbox = parse_bbox(bbox_str)
             if bbox is not None:
-                print(f"Processing bbox: {bbox}", flush=True)
                 logger.info(f"Processing bbox: {bbox}")
 
             try:

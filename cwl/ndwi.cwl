@@ -7,9 +7,9 @@ schemas:
 
 $graph:
   - class: Workflow
-    id: ndvi-workflow
-    label: NDVI Calculation workflow
-    doc: Computes NDVI from a STAC item's red and nir bands and writes a COG with renderable STAC.
+    id: ndwi-workflow
+    label: NDWI Calculation workflow
+    doc: Computes NDWI from a STAC item's green and nir bands and writes a COG with renderable STAC.
     requirements:
       - class: ResourceRequirement
         coresMax: 2
@@ -25,17 +25,17 @@ $graph:
       - id: results
         type: Directory
         outputSource:
-          - ndvi-step/results
+          - ndwi-step/results
     steps:
-      ndvi-step:
-        run: "#ndvi-tool"
+      ndwi-step:
+        run: "#ndwi-tool"
         in:
           stac_item_dir: stac_item
           bbox: bbox
         out: [results]
 
   - class: CommandLineTool
-    id: ndvi-tool
+    id: ndwi-tool
     requirements:
       - class: ResourceRequirement
         coresMax: 1
@@ -43,8 +43,8 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/raster-workflows:2.0.0
-    baseCommand: ["python3", "/app/run_product.py", "--product", "ndvi"]
+        dockerPull: public.ecr.aws/eodh/raster-workflows:2.0.0
+    baseCommand: ["python3", "/app/run_product.py", "--product", "ndwi"]
     inputs:
       stac_item_dir:
         type: Directory

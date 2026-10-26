@@ -75,7 +75,6 @@ def _calculate_process_window(src, bbox) -> rasterio.windows.Window:
     if src.crs != "EPSG:4326":
         try:
             bbox_transformed = transform_bounds("EPSG:4326", src.crs, xmin, ymin, xmax, ymax)
-            print(f"Bbox transformed from WGS84 to {src.crs}: {bbox_transformed}")
             logger.info(f"Bbox transformed from WGS84 to {src.crs}: {bbox_transformed}")
             xmin, ymin, xmax, ymax = bbox_transformed
         except Exception as e:
@@ -116,14 +115,16 @@ def _calculate_process_window(src, bbox) -> rasterio.windows.Window:
 
 def _bytes_per_pixel(sources: dict, inputs: Sequence[InputBand], read_dtype: str, output_band_count: int) -> int:
     """
-    Memory per chunk pixel while a chunk is processed: each input band as read and as cast to
-    `read_dtype`, its validity mask, and the output bands.
+    Memory per chunk pixel while a chunk is processed: each input band as read, its copy cast to
+    `read_dtype` (only when the dtype differs), its validity mask, and the output bands.
     """
     read_size = np.dtype(read_dtype).itemsize
     total = output_band_count * read_size
     for path, band_index in inputs:
-        native_size = np.dtype(sources[path].dtypes[band_index - 1]).itemsize
-        total += native_size + read_size + 1
+        native_dtype = np.dtype(sources[path].dtypes[band_index - 1])
+        total += native_dtype.itemsize + 1
+        if native_dtype != np.dtype(read_dtype):
+            total += read_size
     return total
 
 
@@ -233,7 +234,7 @@ def process_product(
 
                 try:
                     band_arrays = [
-                        sources[path].read(band_index, window=input_window).astype(read_dtype)
+                        sources[path].read(band_index, window=input_window).astype(read_dtype, copy=False)
                         for path, band_index in inputs
                     ]
                     output_chunk = compute_chunk_fn(*band_arrays)

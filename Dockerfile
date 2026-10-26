@@ -1,44 +1,27 @@
-# Build stage
-FROM python:3.12-alpine AS builder
+# Python and dependency versions match the tests: Python from .python-version, packages from uv.lock.
+# rasterio's wheel bundles GDAL, so no system GDAL or compiler is needed.
+FROM python:3.13-slim
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.6 /uv /usr/local/bin/uv
+
+# The only system library the rasterio wheel does not bundle.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache \
-    expat \
-    gdal \
-    gdal-dev \
-    gcc \
-    g++ \
-    musl-dev \
-    python3-dev \
-    linux-headers \
-    && rm -rf /var/cache/apk/*
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
 
-COPY ./requirements.txt /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project && rm -rf /root/.cache/uv
 
-# Install Python packages (this will compile rasterio and other packages)
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Runtime stage
-FROM python:3.12-alpine AS runtime
-
-WORKDIR /app
-
-# Install only runtime dependencies (no build tools)
-RUN apk add --no-cache \
-    expat \
-    gdal \
-    && rm -rf /var/cache/apk/*
-
-# Copy Python packages from builder stage
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Copy application code
-COPY --chmod=0644 ./src/*.py /app
+# World-readable so the code runs whatever user the workflow runner uses.
+COPY --chmod=0644 ./src/*.py /app/
 
 # CWL overrides this via baseCommand (run_product.py --product <ndvi|ndwi|clip>).
 CMD ["python3", "-u", "run_product.py", "--help"]
-
-

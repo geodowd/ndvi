@@ -4,9 +4,9 @@ Workflows for the EO DataHub (EODH) Workflow Runner (ADES) that compute raster p
 
 | Workflow | CWL file | Output |
 |---|---|---|
-| NDVI | `ndvi.cwl` | `(NIR - Red) / (NIR + Red)`, float32, values in [-1, 1] |
-| NDWI | `ndwi.cwl` | `(Green - NIR) / (Green + NIR)`, float32, values in [-1, 1] |
-| Clip | `clip.cwl` | All bands of the source raster asset, clipped to a bounding box. The data type and nodata value do not change. |
+| NDVI | `cwl/ndvi.cwl` | `(NIR - Red) / (NIR + Red)`, float32, values in [-1, 1] |
+| NDWI | `cwl/ndwi.cwl` | `(Green - NIR) / (Green + NIR)`, float32, values in [-1, 1] |
+| Clip | `cwl/clip.cwl` | All bands of the source raster asset, clipped to a bounding box. The data type and nodata value do not change. |
 
 `example_job_inputs.json` is an example job input for any of the three workflows.
 
@@ -144,7 +144,9 @@ uv run pytest
 
 The tests do not need network access. They create small synthetic COGs and run each product end to end. They then check the COG with `rio_cogeo`, and validate the STAC against the core schemas bundled with pystac and the extension schemas in `tests/schemas/`.
 
-CI runs `ruff` and `pytest` on each pull request. See `.github/workflows/tests.yml`.
+CI runs `ruff`, `cwltool --validate` on each CWL file, and `pytest` on each pull request. See `.github/workflows/tests.yml`.
+
+The pre-commit hooks run the same `ruff` version as CI, the one pinned in `uv.lock`. To install them, run `uv run pre-commit install`.
 
 ## Release a new version
 
@@ -158,7 +160,12 @@ The Docker image is not built in CI. To release:
    ```
 
 3. Push the image to the public ECR repository.
-4. Deploy the updated CWL files to the Workflow Runner.
+4. Merge to `main`.
+5. Deploy the updated CWL files to the Workflow Runner.
+
+Push the image before you merge. The EODH workflow catalogue (`workflow-catalogue`, `catalogue/eodh-workflows-notebooks/workflows/`) links to the CWL files on `main`. As soon as the merge happens, those links serve CWL files that refer to the new image tag.
+
+If a CWL file moves, or the repository is renamed, update those links in `workflow-catalogue` in the same release.
 
 Version 2.0.0 changes the output format. The asset key, the STAC tree, the STAC version and the clip data type are all different from version 1.x. Workflows that use version 1.x images (`eodh/ndvi`) continue to work.
 

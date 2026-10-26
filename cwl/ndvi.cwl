@@ -7,9 +7,9 @@ schemas:
 
 $graph:
   - class: Workflow
-    id: clip-workflow
-    label: Clip COG workflow
-    doc: Clips a STAC item's raster asset to a bounding box and writes a COG with renderable STAC.
+    id: ndvi-workflow
+    label: NDVI Calculation workflow
+    doc: Computes NDVI from a STAC item's red and nir bands and writes a COG with renderable STAC.
     requirements:
       - class: ResourceRequirement
         coresMax: 2
@@ -25,17 +25,17 @@ $graph:
       - id: results
         type: Directory
         outputSource:
-          - clip-step/results
+          - ndvi-step/results
     steps:
-      clip-step:
-        run: "#clip-tool"
+      ndvi-step:
+        run: "#ndvi-tool"
         in:
           stac_item_dir: stac_item
           bbox: bbox
         out: [results]
 
   - class: CommandLineTool
-    id: clip-tool
+    id: ndvi-tool
     requirements:
       - class: ResourceRequirement
         coresMax: 1
@@ -43,8 +43,8 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/raster-workflows:2.0.0
-    baseCommand: ["python3", "/app/run_product.py", "--product", "clip"]
+        dockerPull: public.ecr.aws/eodh/raster-workflows:2.0.0
+    baseCommand: ["python3", "/app/run_product.py", "--product", "ndvi"]
     inputs:
       stac_item_dir:
         type: Directory
