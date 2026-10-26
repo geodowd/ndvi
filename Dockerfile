@@ -36,9 +36,9 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
-COPY ./*.py /app
+COPY --chmod=0644 ./src/*.py /app
 
-# Default command kept for backwards compatibility; CWL overrides via baseCommand.
-CMD ["python3", "-u", "run_ndvi.py"]
+# CWL overrides this via baseCommand (run_product.py --product <ndvi|ndwi|clip>).
+CMD ["python3", "-u", "run_product.py", "--help"]
 
 

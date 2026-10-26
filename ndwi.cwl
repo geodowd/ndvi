@@ -1,7 +1,7 @@
 cwlVersion: v1.2
 $namespaces:
   s: https://schema.org/
-s:softwareVersion: 1.5.0
+s:softwareVersion: 2.0.0
 schemas:
   - http://schema.org/version/9.0/schemaorg-current-http.rdf
 
@@ -9,6 +9,7 @@ $graph:
   - class: Workflow
     id: ndwi-workflow
     label: NDWI Calculation workflow
+    doc: Computes NDWI from a STAC item's green and nir bands and writes a COG with renderable STAC.
     requirements:
       - class: ResourceRequirement
         coresMax: 2
@@ -42,8 +43,8 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/i2j9m5r4/eodh/ndvi:1.5.0
-    baseCommand: ["python3", "/app/run_ndwi.py"]
+        dockerPull: public.ecr.aws/i2j9m5r4/eodh/raster-workflows:2.0.0
+    baseCommand: ["python3", "/app/run_product.py", "--product", "ndwi"]
     inputs:
       stac_item_dir:
         type: Directory
@@ -63,4 +64,3 @@ $graph:
         type: Directory
         outputBinding:
           glob: "."
-

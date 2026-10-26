@@ -7,7 +7,7 @@ from stac_io import resolve_stac_input_from_stagein
 
 
 def _stage_item(tmp_path: Path, fixture_name: str) -> Path:
-    fixture_path = Path(__file__).parent / "dist" / fixture_name
+    fixture_path = Path(__file__).parent / "fixtures" / fixture_name
     with fixture_path.open("r", encoding="utf-8") as f:
         item = json.load(f)
 
@@ -35,7 +35,7 @@ def _stage_item(tmp_path: Path, fixture_name: str) -> Path:
 
 
 def test_resolver_prefers_single_cog_and_maps_common_names(tmp_path: Path):
-    staged_dir = _stage_item(tmp_path, "original.json")
+    staged_dir = _stage_item(tmp_path, "ceda_ard_item.json")
     resolved = resolve_stac_input_from_stagein(staged_dir, required_common_names=("red", "nir"))
 
     assert resolved.mode == "single_source"
@@ -47,7 +47,7 @@ def test_resolver_prefers_single_cog_and_maps_common_names(tmp_path: Path):
 
 
 def test_resolver_falls_back_to_per_band_assets(tmp_path: Path):
-    staged_dir = _stage_item(tmp_path, "e84.json")
+    staged_dir = _stage_item(tmp_path, "e84_item.json")
     resolved = resolve_stac_input_from_stagein(staged_dir, required_common_names=("green", "nir"))
 
     assert resolved.mode == "multi_source"
@@ -57,7 +57,7 @@ def test_resolver_falls_back_to_per_band_assets(tmp_path: Path):
 
 
 def test_resolver_errors_when_required_common_name_missing(tmp_path: Path):
-    staged_dir = _stage_item(tmp_path, "e84.json")
+    staged_dir = _stage_item(tmp_path, "e84_item.json")
     item_files = list(tmp_path.glob("*.json"))
     item_file = [p for p in item_files if p.name != "catalog.json"][0]
     with item_file.open("r", encoding="utf-8") as f:

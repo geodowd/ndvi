@@ -15,10 +15,17 @@ class ResolvedStacInput:
     bands_by_common_name: Optional[Dict[str, int]] = None
     paths_by_common_name: Optional[Dict[str, Path]] = None
     source_asset_key: Optional[str] = None
+    source_asset: Optional[dict] = None
+    source_item: Optional[dict] = None
 
 
 def _extract_common_name(band: dict) -> Optional[str]:
     return band.get("common_name") or band.get("eo:common_name")
+
+
+def asset_bands(asset: dict) -> list:
+    """Band list of an asset: STAC 1.0 `eo:bands` or STAC 1.1 `bands`."""
+    return asset.get("eo:bands") or asset.get("bands") or []
 
 
 def _resolve_asset_href(stac_item_dir: Path, item_root: Path, href: str) -> Path:
@@ -33,8 +40,7 @@ def _resolve_asset_href(stac_item_dir: Path, item_root: Path, href: str) -> Path
         return candidate
 
     raise RuntimeError(
-        f"Asset href {href!r} could not be resolved under "
-        f"item_root={item_root} or stac_item_dir={stac_item_dir}"
+        f"Asset href {href!r} could not be resolved under item_root={item_root} or stac_item_dir={stac_item_dir}"
     )
 
 
@@ -91,9 +97,9 @@ def _load_item_and_assets(stac_item_dir: Path):
 def resolve_stac_input_from_stagein(
     stac_item_dir: Path,
     required_common_names: Optional[Sequence[str]] = None,
-    preferred_keys: Sequence[str] = ("cog", "cog_rgb"),
+    preferred_keys: Sequence[str] = ("cog", "cog_rgb", "data"),
 ) -> ResolvedStacInput:
-    _, assets, item_root = _load_item_and_assets(stac_item_dir)
+    item, assets, item_root = _load_item_and_assets(stac_item_dir)
     required = tuple(required_common_names or ())
 
     chosen_asset = None
@@ -102,7 +108,7 @@ def resolve_stac_input_from_stagein(
         if key in assets:
             chosen_asset = assets[key]
             chosen_asset_key = key
-            logger.info(f"Using asset '{key}' from STAC Item as NDVI input")
+            logger.info(f"Using asset '{key}' from STAC Item as input")
             break
 
     if chosen_asset is not None:
@@ -112,7 +118,7 @@ def resolve_stac_input_from_stagein(
 
         input_cog_local = _resolve_asset_href(stac_item_dir, item_root, href)
         bands_by_common_name: Dict[str, int] = {}
-        for idx, band in enumerate(chosen_asset.get("eo:bands", []), start=1):
+        for idx, band in enumerate(asset_bands(chosen_asset), start=1):
             if not isinstance(band, dict):
                 continue
             common_name = _extract_common_name(band)
@@ -139,6 +145,8 @@ def resolve_stac_input_from_stagein(
             single_path=input_cog_local,
             bands_by_common_name=bands_by_common_name,
             source_asset_key=chosen_asset_key,
+            source_asset=chosen_asset,
+            source_item=item,
         )
 
     if not required:
@@ -160,7 +168,7 @@ def resolve_stac_input_from_stagein(
         if asset_key in required:
             candidate_common_names.add(asset_key)
 
-        for band in asset.get("eo:bands", []):
+        for band in asset_bands(asset):
             if isinstance(band, dict):
                 common_name = _extract_common_name(band)
                 if common_name:
@@ -190,12 +198,5 @@ def resolve_stac_input_from_stagein(
         mode="multi_source",
         primary_path=paths_by_common_name[primary_common_name],
         paths_by_common_name=paths_by_common_name,
+        source_item=item,
     )
-
-
-def resolve_input_cog_from_stagein(stac_item_dir: Path) -> Path:
-    resolved = resolve_stac_input_from_stagein(stac_item_dir)
-    if resolved.single_path is None:
-        raise RuntimeError("Expected single-source STAC input, but resolver returned multi-source input")
-    logger.info(f"NDVI input: asset_key={resolved.source_asset_key!r}, path={resolved.single_path}")
-    return resolved.single_path

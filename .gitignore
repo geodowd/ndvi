@@ -9,3 +9,5 @@ wheels/
 # Virtual environments
 .venv
 docker_*
+# Local run outputs (see README)
+out/
