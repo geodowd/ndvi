@@ -1,7 +1,7 @@
 cwlVersion: v1.2
 $namespaces:
   s: https://schema.org/
-s:softwareVersion: 2.0.0
+s:softwareVersion: 2.0.2
 schemas:
   - http://schema.org/version/9.0/schemaorg-current-http.rdf
 
@@ -43,7 +43,7 @@ $graph:
       - class: InlineJavascriptRequirement
     hints:
       DockerRequirement:
-        dockerPull: public.ecr.aws/eodh/raster-workflows:2.0.0
+        dockerPull: public.ecr.aws/eodh/raster-workflows:2.0.2
     baseCommand: ["python3", "/app/run_product.py", "--product", "ndwi"]
     inputs:
       stac_item_dir:

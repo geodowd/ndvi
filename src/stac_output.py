@@ -5,18 +5,25 @@ the Collection (read by titiler-stacapi) and the Item (read by titiler's /render
 Layout, relative to the output directory:
 
     catalog.json
-    <product>/collection.json
-    <product>/<item_id>/<item_id>.json
+    <run_id>/collection.json
+    <run_id>/<item_id>/<item_id>.json
     <item_id>.tif
 
 ADES stage-out keeps each asset's path relative to the output root, so a COG at the root
 lands next to its item JSON in the workspace.
+
+Stage-out writes every run of a workflow under the same folder
+(`processing-results/<workflow-id>/<catalog id>/<collection id>/...`). The catalog ID is the
+product ID, the same for every run, and the collection ID is unique per run, so each run is its
+own collection and runs cannot overwrite each other. This matches stage-out's own default of a
+`col_<job_id>` collection.
 """
 
 import copy
 import datetime as dt
 import logging
 import math
+import uuid
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
@@ -30,10 +37,6 @@ from renders import OUTPUT_ASSET_KEY
 from stac_io import asset_bands
 
 logger = logging.getLogger(__name__)
-
-CATALOG_ID = "eodh-raster-workflows"
-CATALOG_TITLE = "EODH Raster Workflows"
-CATALOG_DESCRIPTION = "Outputs of the EODH raster workflows (NDVI, NDWI and clip)."
 
 PROJECTION_EXTENSION = "https://stac-extensions.github.io/projection/v2.0.0/schema.json"
 RENDER_EXTENSION = "https://stac-extensions.github.io/render/v2.1.0/schema.json"
@@ -144,6 +147,11 @@ def _extensions_for(properties: dict, bands: Iterable[dict]) -> List[str]:
     return extensions
 
 
+def run_collection_id(product_id: str, now: dt.datetime) -> str:
+    """Collection ID unique to this run, e.g. `ndvi-20261027T082302-3f9a1c`."""
+    return f"{product_id}-{now:%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
+
+
 def write_product_stac(
     output_dir: Path,
     cog_path: Path,
@@ -167,7 +175,8 @@ def write_product_stac(
         projection = _projection_properties(src)
 
     item_datetime, datetime_range = _item_datetimes(source_properties)
-    now = pystac.utils.datetime_to_str(dt.datetime.now(dt.timezone.utc))
+    run_time = dt.datetime.now(dt.timezone.utc)
+    now = pystac.utils.datetime_to_str(run_time)
     properties = {
         **datetime_range,
         "created": now,
@@ -210,9 +219,10 @@ def write_product_stac(
         ),
     )
 
+    collection_id = run_collection_id(product.id, run_time)
     collection = pystac.Collection(
-        id=product.id,
-        title=product.title,
+        id=collection_id,
+        title=f"{product.title} – {run_time:%Y-%m-%d %H:%M} UTC",
         description=f"{product.description} Licence follows the source data.",
         extent=pystac.Extent(pystac.SpatialExtent([bbox]), pystac.TemporalExtent([[None, None]])),
         license=source_properties.get("license") or "other",
@@ -237,7 +247,11 @@ def write_product_stac(
         )
     }
 
-    catalog = pystac.Catalog(id=CATALOG_ID, title=CATALOG_TITLE, description=CATALOG_DESCRIPTION)
+    catalog = pystac.Catalog(
+        id=product.id,
+        title=f"{product.title} outputs",
+        description=f"Outputs of the EODH {product.title} workflow, one collection per run.",
+    )
     catalog.add_child(collection)
     collection.add_item(item)
     # ADES stage-out does not recompute the extent of collections it is given.
@@ -248,5 +262,5 @@ def write_product_stac(
     catalog.save(catalog_type=pystac.CatalogType.SELF_CONTAINED)
 
     catalog_path = output_dir / "catalog.json"
-    logger.info(f"Wrote STAC catalog {catalog_path} (collection {product.id!r}, item {item_id!r})")
+    logger.info(f"Wrote STAC catalog {catalog_path} (collection {collection_id!r}, item {item_id!r})")
     return catalog_path

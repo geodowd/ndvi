@@ -45,15 +45,17 @@ The minimum size is 0.001 degrees on each side. If you leave `--bbox` out, the t
 The tool writes these files to the output directory:
 
 ```
-catalog.json                          Catalog "eodh-raster-workflows"
-<product>/collection.json             Collection "ndvi", "ndwi" or "clip"
-<product>/<item_id>/<item_id>.json    Item
+catalog.json                          Catalog "ndvi", "ndwi" or "clip"
+<run_id>/collection.json              Collection "<product>-<UTC time>-<random>", unique to the run
+<run_id>/<item_id>/<item_id>.json     Item
 <item_id>.tif                         COG
 ```
 
 The item ID is `<source item ID>_<product>`. Each job has one item.
 
 Stage-out keeps each asset's path relative to the output directory. Because the COG is at the top level, it lands next to its item JSON in the workspace.
+
+Stage-out writes every run of a workflow to the same folder, `processing-results/<workflow ID>/<catalog ID>/<collection ID>/`. The catalog ID is the product, the same for every run. The collection ID is unique to each run, for example `ndvi-20261027T082302-3f9a1c`, so each run is its own collection and runs cannot overwrite each other. Stage-out uses the same pattern when a workflow writes no collection: it creates one called `col_<job ID>`.
 
 ### The COG
 
@@ -67,8 +69,8 @@ The output is STAC 1.1.
 
 | Object | Contents |
 |---|---|
-| Catalog | ID `eodh-raster-workflows`. |
-| Collection | Title, description, keywords, provider, `item_assets`, `renders`, and an extent computed from the item. The licence is the source item's `license` property, or `other` if the source item has none. |
+| Catalog | ID of the product (`ndvi`, `ndwi` or `clip`), title "<product> outputs". |
+| Collection | ID unique to the run (see [Files](#files)), title "<product> – <UTC run time>". Description, keywords, provider, `item_assets`, `renders`, and an extent computed from the item. The licence is the source item's `license` property, or `other` if the source item has none. |
 | Item | Footprint of the output raster, reprojected to EPSG:4326. Acquisition `datetime` from the source item. `platform`, `constellation`, `instruments` and `eo:cloud_cover` from the source item. Projection fields (`proj:code`, `proj:shape`, `proj:transform`, `proj:bbox`) and `gsd` from the output. `eodh:product` and `eodh:source_item_id`. If you gave a bounding box, also `eodh:subset` and `eodh:requested_bbox`. |
 | Asset `data` | The COG. Media type `image/tiff; application=geotiff; profile=cloud-optimized`, role `data`, and `bands` with the data type, nodata value and statistics. |
 
@@ -104,7 +106,7 @@ Use this list for any workflow that writes raster outputs to EODH:
 
 1. Write a COG with internal overviews. GDAL cannot write a COG in windows, so write a tiled GTiff first, then copy it with the `COG` driver. See `write_cog` in `src/cog.py`.
 2. Set a nodata value that is not also a valid data value. For float data, use NaN.
-3. Write a root `catalog.json` that has a meaningful ID. Under it, write a Collection that contains your items. Stage-out uses the Collection as it is and does not recompute its extent, so compute the extent yourself.
+3. Write a root `catalog.json`, and under it a Collection that contains your items. Give the Collection an ID that is unique to the run. Stage-out writes every run of a workflow to the same folder, so a fixed catalog ID and a fixed collection ID make runs overwrite each other. Stage-out uses the Collection as it is and does not recompute its extent, so compute the extent yourself.
 4. Give each asset a media type, `roles: ["data"]` and `bands`.
 5. Add `renders` to the Collection and to each Item. Every render needs `assets` that exist on the item, and an explicit `rescale`.
 6. Validate the output with pystac and the render extension schema. See `tests/test_end_to_end.py`.
@@ -156,7 +158,7 @@ The Docker image is not built in CI. To release:
 2. Build the image:
 
    ```bash
-   docker build -t public.ecr.aws/i2j9m5r4/eodh/raster-workflows:<version> .
+   docker build -t public.ecr.aws/eodh/raster-workflows:<version> .
    ```
 
 3. Push the image to the public ECR repository.

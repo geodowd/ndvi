@@ -1,5 +1,6 @@
 import json
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -11,7 +12,6 @@ from rio_cogeo.cogeo import cog_validate
 from conftest import GREEN, NIR, NODATA_COLUMNS, RED
 from products import PRODUCTS
 from run_product import run
-from stac_output import CATALOG_ID
 
 BBOX = "-3.60,51.58,-3.57,51.60"
 
@@ -29,24 +29,25 @@ def _output_files(output_dir: Path):
 
 def _assert_renderable(output_dir: Path, product_id: str, item_id: str):
     """Checks every product's output must pass, whatever the product."""
+    catalog, collection, item = _load(output_dir)
+    catalog.validate_all()
+
+    assert catalog.id == product_id
+    # Unique per run: stage-out puts every run of a workflow under the same catalog folder.
+    assert re.fullmatch(rf"{product_id}-\d{{8}}T\d{{6}}-[0-9a-f]{{6}}", collection.id)
+    assert item.id == item_id
+
     assert _output_files(output_dir) == sorted(
         [
             "catalog.json",
-            f"{product_id}/collection.json",
-            f"{product_id}/{item_id}/{item_id}.json",
+            f"{collection.id}/collection.json",
+            f"{collection.id}/{item_id}/{item_id}.json",
             f"{item_id}.tif",
         ]
     )
 
-    catalog, collection, item = _load(output_dir)
-    catalog.validate_all()
-
-    assert catalog.id == CATALOG_ID
-    assert collection.id == product_id
-    assert item.id == item_id
-
-    raw_item = json.loads((output_dir / product_id / item_id / f"{item_id}.json").read_text())
-    raw_collection = json.loads((output_dir / product_id / "collection.json").read_text())
+    raw_item = json.loads((output_dir / collection.id / item_id / f"{item_id}.json").read_text())
+    raw_collection = json.loads((output_dir / collection.id / "collection.json").read_text())
     assert raw_item["stac_version"] == "1.1.0"
     assert raw_item["assets"]["data"]["href"] == f"../../{item_id}.tif"
 
@@ -206,3 +207,16 @@ def test_mismatched_input_grids_are_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="matching transforms"):
         process_product([(str(a), 1), (str(b), 1)], str(tmp_path / "out.tif"), normalised_difference)
+
+
+def test_each_run_gets_its_own_collection(ard_item, stage_ard, tmp_path):
+    staged = stage_ard(ard_item)
+    catalog_ids, collection_ids = set(), set()
+    for name in ("first", "second"):
+        output_dir = tmp_path / name
+        run(PRODUCTS["ndvi"], stac_item_dir=staged, output_dir=output_dir)
+        catalog, collection, _ = _load(output_dir)
+        catalog_ids.add(catalog.id)
+        collection_ids.add(collection.id)
+    assert catalog_ids == {"ndvi"}
+    assert len(collection_ids) == 2
